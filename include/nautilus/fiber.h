@@ -23,13 +23,11 @@
  * redistribute, and modify it as specified in the file "LICENSE.txt".
  */
 
-/* Not 100% sure why this is here, but it seems important */
 #ifndef __FIBER_H__
 #define __FIBER_H__
 
 #ifdef __cplusplus
-extern "C"
-{
+extern "C" {
 #endif
 
 #ifndef __ASSEMBLER__
@@ -42,7 +40,7 @@ extern "C"
 
 #include <nautilus/scheduler.h>
 
-    typedef uint64_t nk_stack_size_t;
+typedef uint64_t nk_stack_size_t;
 
 #define CPU_ANY -1
 
@@ -52,76 +50,75 @@ extern "C"
 #define TSTACK_1MB 0x100000
 #define TSTACK_2MB 0x200000
 
-    /******** EXTERNAL INTERFACE **********/
+/******** EXTERNAL INTERFACE **********/
 
-    // opaque pointer given to users
-    typedef void *nk_thread_id_t;
+// opaque pointer given to users
+typedef void *nk_thread_id_t;
+
 // this bad id value is intended for use with fork
 // which cannot do error reporting the usual way
 #define NK_BAD_THREAD_ID ((void *)(-1ULL))
-    typedef void (*nk_thread_fun_t)(void *input, void **output);
+typedef void (*nk_thread_fun_t)(void *input, void **output);
 
-    // All code above was copied from thread.h
-    // I thought it would be a good place to start for headers
+// All code above was copied from thread.h
+// I thought it would be a good place to start for headers
 
-    typedef struct nk_fiber
-    {
-        uint64_t rsp;                /* +0  SHOULD NOT CHANGE POSITION */
-        void *stack;                 /* +8  SHOULD NOT CHANGE POSITION */
-        uint16_t fpu_state_offset;   /* +16 SHOULD NOT CHANGE POSITION */
-        nk_cache_part_thread_state_t /* +18 SHOULD NOT CHANGE POSITION */
-            cache_part_state;        /* Always included to reserve this "slot" for asm code */
-        nk_stack_size_t stack_size;
-        unsigned long fid; /* Fiber ID, may not be needed? */
+typedef struct nk_fiber {
+  uint64_t rsp;                /* +0  SHOULD NOT CHANGE POSITION */
+  void *stack;                 /* +8  SHOULD NOT CHANGE POSITION */
+  uint16_t fpu_state_offset;   /* +16 SHOULD NOT CHANGE POSITION */
+  nk_cache_part_thread_state_t /* +18 SHOULD NOT CHANGE POSITION */
+      cache_part_state;        /* Always included to reserve this "slot" for asm code */
+  nk_stack_size_t stack_size;
+  unsigned long fid; /* Fiber ID, may not be needed? */
 
-        /* Only necessary if we decide to implement join/wait */
-        nk_wait_queue_t *waitq; // wait queue for threads waiting on this thread
-        int num_wait;           // how many wait queues this thread is currently on
+  /* Only necessary if we decide to implement join/wait */
+  nk_wait_queue_t *waitq; // wait queue for threads waiting on this thread
+  int num_wait;           // how many wait queues this thread is currently on
 
-        /* Current running info? */
-        int bound_cpu;
-        int placement_cpu;
-        int current_cpu;
-        uint8_t is_idle;
+  /* Current running info? */
+  int bound_cpu;
+  int placement_cpu;
+  int current_cpu;
+  uint8_t is_idle;
 
 #ifdef NAUT_CONFIG_GARBAGE_COLLECTION
-        void *gc_state;
+  void *gc_state;
 #endif
 
-        /* unsure about types of these */
-        void *(*func)(void *);
-        void *args;
+  /* unsure about types of these */
+  void *(*func)(void *);
+  void *args;
+} nk_fiber_t;
 
-    } nk_fiber_t;
+nk_fiber_t *nk_fiber_create(void *(*func)(void *)fun, void *args);
 
-    nk_fiber_t *nk_fiber_create(void *(*func)(void *)fun, void *args);
+void nk_fiber_run(nk_fiber_t);
 
-    void nk_fiber_run(nk_fiber_t);
+void nk_fiber_start(func, arg);
 
-    void nk_fiber_start(func, arg);
+// takes a fiber, a condition to yield on, and a function to check that condition
+// returns 0 if the fiber does not yield
+int nk_fiber_conditional_yield(nk_fiber_t *fib, bool (*cond_function)(void *), void *state);
 
-    // takes a fiber, a condition to yield on, and a function to check that condition
-    // returns 0 if the fiber does not yield
-    int nk_fiber_conditional_yield(nk_fiber_t *fib, bool (*cond_function)(void *), void *state);
+// default yield function; implemented on top of conditional yield
+void nk_fiber_yield();
 
-    // default yield function; implemented on top of conditional yield
-    void nk_fiber_yield();
+// yield that allows choice of fiber to yield to
+void nk_fiber_yield_to(nk_fiber_t *fib);
 
-    // yield that allows choice of fiber to yield to
-    void nk_fiber_yield_to(nk_fiber_t *fib);
+// returns a ptr to the current fiber
+nk_fiber_t *nk_fiber_current();
 
-    // returns a ptr to the current fiber
-    nk_fiber_t *nk_fiber_current();
+// not needed for initial implementation
+nk_fiber_t *nk_fiber_fork();
 
-    // not needed for initial implementation
-    nk_fiber_t *nk_fiber_fork();
+// not needed for inital implementation
+void nk_fiber_join();
 
-    // not needed for inital implementation
-    void nk_fiber_join();
-
-    // not needed for initial implentation, will be needed to prevent bugs
-    // prevents the fiber's thread from context switching when the fiber is context switching
-    void nk_fiber_master_lock(nk_fiber_t *fib);
+// not needed for initial implentation, will be needed to prevent bugs
+// prevents the fiber's thread from context switching when the fiber is context switching
+void nk_fiber_master_lock(nk_fiber_t *fib);
 
 #endif /* !__ASSEMBLER */
 
