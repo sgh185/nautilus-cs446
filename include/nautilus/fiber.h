@@ -58,7 +58,7 @@ typedef void *nk_thread_id_t;
 // this bad id value is intended for use with fork
 // which cannot do error reporting the usual way
 #define NK_BAD_THREAD_ID ((void *)(-1ULL))
-typedef void (*nk_thread_fun_t)(void *input, void **output);
+typedef void (*nk_fiber_fun_t)(void *input, void **output);
 
 // All code above was copied from thread.h
 // I thought it would be a good place to start for headers
@@ -86,15 +86,18 @@ typedef struct nk_fiber {
   void *gc_state;
 #endif
 
-  /* unsure about types of these */
-  void *(*func)(void *);
-  void *args;
+  nk_fiber_fun_t fun;
+  void *input;
+  void **output;
 } nk_fiber_t;
 
-nk_fiber_t *nk_fiber_create(void *(*func)(void *)fun, void *args);
+// Create a fiber but do not launch it
+int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, nk_fiber_t **fiber_output);
 
+// Launch a previously created fiber
 void nk_fiber_run(nk_fiber_t);
 
+// Create and launch a fiber
 void nk_fiber_start(func, arg);
 
 // takes a fiber, a condition to yield on, and a function to check that condition
