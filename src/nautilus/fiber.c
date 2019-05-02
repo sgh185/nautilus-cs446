@@ -38,6 +38,15 @@
 #include <nautilus/errno.h>
 #include <nautilus/mm.h>
 
+#ifndef NAUT_CONFIG_DEBUG_FIBERS
+#undef  DEBUG_PRINT
+#define DEBUG_PRINT(fmt, args...)
+#endif
+#define FIBER_INFO(fmt, args...) INFO_PRINT("Fiber: " fmt, ##args)
+#define FIBER_ERROR(fmt, args...) ERROR_PRINT("Fiber: " fmt, ##args)
+#define FIBER_DEBUG(fmt, args...) DEBUG_PRINT("Fiber: " fmt, ##args)
+#define FIBER_WARN(fmt, args...)  WARN_PRINT("Fiber: " fmt, ##args)
+
 /******** EXTERNAL INTERFACE **********/
 
 int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, nk_fiber_t **fiber_output){
