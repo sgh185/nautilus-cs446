@@ -90,9 +90,9 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
   return 0;
 }
 
-void nk_fiber_run(nk_fiber_t);
+int nk_fiber_run(nk_fiber_t);
 
-void nk_fiber_start(func, arg){
+int nk_fiber_start(func, arg){
   // Call nk_fiber_create()
 
   // Call nk_fiber_run()
@@ -100,9 +100,9 @@ void nk_fiber_start(func, arg){
 
 int nk_fiber_conditional_yield(nk_fiber_t *fib, bool (*cond_function)(void *), void *state);
 
-void nk_fiber_yield();
+int nk_fiber_yield();
 
-void nk_fiber_yield_to(nk_fiber_t *fib);
+int nk_fiber_yield_to(nk_fiber_t *fib);
 
 nk_fiber_t *nk_fiber_current();
 

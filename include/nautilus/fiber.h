@@ -95,20 +95,20 @@ typedef struct nk_fiber {
 int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, nk_fiber_t **fiber_output);
 
 // Launch a previously created fiber
-void nk_fiber_run(nk_fiber_t);
+int nk_fiber_run(nk_fiber_t);
 
 // Create and launch a fiber
-void nk_fiber_start(func, arg);
+int nk_fiber_start(func, arg);
 
 // takes a fiber, a condition to yield on, and a function to check that condition
 // returns 0 if the fiber does not yield
 int nk_fiber_conditional_yield(nk_fiber_t *fib, bool (*cond_function)(void *), void *state);
 
 // default yield function; implemented on top of conditional yield
-void nk_fiber_yield();
+int nk_fiber_yield();
 
 // yield that allows choice of fiber to yield to
-void nk_fiber_yield_to(nk_fiber_t *fib);
+int nk_fiber_yield_to(nk_fiber_t *fib);
 
 // returns a ptr to the current fiber
 nk_fiber_t *nk_fiber_current();
