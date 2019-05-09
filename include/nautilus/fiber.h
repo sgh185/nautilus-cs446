@@ -123,6 +123,8 @@ void nk_fiber_join();
 // prevents the fiber's thread from context switching when the fiber is context switching
 void nk_fiber_master_lock(nk_fiber_t *fib);
 
+void nk_fiber_context_switch(nk_fiber_t *cur, nk_fiber_t *next);
+
 #endif /* !__ASSEMBLER */
 
 #define SAVE_GPRS()          \
