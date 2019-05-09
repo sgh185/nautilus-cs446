@@ -36,10 +36,10 @@
 
 
 ENTRY(nk_fiber_context_switch)
-    SAVE_GPRS()
-    SAVE_FPRS()
+    FIBER_SAVE_GPRS()
+//    SAVE_FPRS()
     movq %rsp, 0x0(%rdi)
     movq 0x0(%rsi), %rsp
-    RESTORE_FPRS()
-    RESTORE_GPRS()
+//    RESTORE_FPRS()
+    FIBER_RESTORE_GPRS()
     retq

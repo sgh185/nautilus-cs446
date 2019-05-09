@@ -95,14 +95,14 @@ typedef struct nk_fiber {
 int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, nk_fiber_t **fiber_output);
 
 // Launch a previously created fiber
-int nk_fiber_run(nk_fiber_t);
+int nk_fiber_run(nk_fiber_t*);
 
 // Create and launch a fiber
 int nk_fiber_start(func, arg);
 
 // takes a fiber, a condition to yield on, and a function to check that condition
 // returns 0 if the fiber does not yield
-int nk_fiber_conditional_yield(nk_fiber_t *fib, bool (*cond_function)(void *), void *state);
+//int nk_fiber_conditional_yield(nk_fiber_t *fib, bool (*cond_function)(void *), void *state);
 
 // default yield function; implemented on top of conditional yield
 int nk_fiber_yield();
@@ -127,41 +127,41 @@ void nk_fiber_context_switch(nk_fiber_t *cur, nk_fiber_t *next);
 
 #endif /* !__ASSEMBLER */
 
-#define SAVE_GPRS()          \
-    movq % rax, -8(% rsp);   \
-    movq % rbx, -16(% rsp);  \
-    movq % rcx, -24(% rsp);  \
-    movq % rdx, -32(% rsp);  \
-    movq % rsi, -40(% rsp);  \
-    movq % rdi, -48(% rsp);  \
-    movq % rbp, -56(% rsp);  \
-    movq % r8, -64(% rsp);   \
-    movq % r9, -72(% rsp);   \
-    movq % r10, -80(% rsp);  \
-    movq % r11, -88(% rsp);  \
-    movq % r12, -96(% rsp);  \
-    movq % r13, -104(% rsp); \
-    movq % r14, -112(% rsp); \
-    movq % r15, -120(% rsp); \
-    subq $120, % rsp;
+#define FIBER_SAVE_GPRS() \
+    movq %rax, -8(%rsp); \
+    movq %rbx, -16(%rsp); \
+    movq %rcx, -24(%rsp); \
+    movq %rdx, -32(%rsp); \
+    movq %rsi, -40(%rsp); \
+    movq %rdi, -48(%rsp); \
+    movq %rbp, -56(%rsp); \
+    movq %r8,  -64(%rsp); \
+    movq %r9,  -72(%rsp); \
+    movq %r10, -80(%rsp); \
+    movq %r11, -88(%rsp); \
+    movq %r12, -96(%rsp); \
+    movq %r13, -104(%rsp); \
+    movq %r14, -112(%rsp); \
+    movq %r15, -120(%rsp); \
+    subq $120, %rsp; 
 
-#define RESTORE_GPRS()      \
-    movq(% rsp), % r15;     \
-    movq 8(% rsp), % r14;   \
-    movq 16(% rsp), % r13;  \
-    movq 24(% rsp), % r12;  \
-    movq 32(% rsp), % r11;  \
-    movq 40(% rsp), % r10;  \
-    movq 48(% rsp), % r9;   \
-    movq 56(% rsp), % r8;   \
-    movq 64(% rsp), % rbp;  \
-    movq 72(% rsp), % rdi;  \
-    movq 80(% rsp), % rsi;  \
-    movq 88(% rsp), % rdx;  \
-    movq 96(% rsp), % rcx;  \
-    movq 104(% rsp), % rbx; \
-    movq 112(% rsp), % rax; \
-    addq $120, % rsp;
+#define FIBER_RESTORE_GPRS() \
+    movq (%rsp), %r15; \
+    movq 8(%rsp), %r14; \
+    movq 16(%rsp), %r13; \
+    movq 24(%rsp), %r12; \
+    movq 32(%rsp), %r11; \
+    movq 40(%rsp), %r10; \
+    movq 48(%rsp), %r9; \
+    movq 56(%rsp), %r8; \
+    movq 64(%rsp), %rbp; \
+    movq 72(%rsp), %rdi; \
+    movq 80(%rsp), %rsi; \
+    movq 88(%rsp), %rdx; \
+    movq 96(%rsp), %rcx; \
+    movq 104(%rsp), %rbx; \
+    movq 112(%rsp), %rax; \
+    addq $120, %rsp; 
 
 #ifdef __cplusplus
 }

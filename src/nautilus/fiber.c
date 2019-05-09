@@ -62,7 +62,7 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
   // Check if an error happened when allocating space for a nk_fiber_t
   if (!fiber) {
     // Print error here
-    return -EINVAL
+    return -EINVAL;
   }
 
   // Initialize the whole struct with zeros
@@ -82,14 +82,14 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
     return -EINVAL;
   }
 
-  // Set some INIT_FIBER status (?)
-
-  // _nk_thread_init (?)
-
   // Initialize function, input, and output related to the fiber
   fiber->fun = fun;
   fiber->input = input;
   fiber->output = output;
+
+  // Set some INIT_FIBER status (?)
+
+  _nk_fiber_init(fiber);
 
   // Return the fiber
   if (fiber_output){
@@ -99,7 +99,55 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
   return 0;
 }
 
-int nk_fiber_run(nk_fiber_t);
+/*
+ * utility function for setting up
+ * a thread's stack 
+ */
+static inline void
+fiber_push (nk_fiber_t * f, uint64_t x)
+{
+    f->rsp -= 8;
+    *(uint64_t*)(f->rsp) = x;
+}
+
+void _fiber_wrapper(nk_fiber_t *f)
+{
+  FIBER_DEBUG("_fiber_wrapper BEGIN\n");
+  f->fun(f->input, f->output);
+  FIBER_DEBUG("_fiber_wrapper END\n");
+
+  return;
+}
+
+void _nk_fiber_init(nk_fiber_t *f){
+  // Setup stack
+  f->rsp = (uint64_t) f->stack + f->stack_size;
+  fiber_push(f, _fiber_wrapper);
+  fiber_push(f, 0xdeadbeef12345670ul);
+  fiber_push(f, 0xdeadbeef12345671ul);
+  fiber_push(f, 0xdeadbeef12345672ul);
+  fiber_push(f, 0xdeadbeef12345673ul);
+  fiber_push(f, 0xdeadbeef12345674ul);
+  fiber_push(f, (uint64_t) f);
+  fiber_push(f, 0xdeadbeef12345675ul);
+  fiber_push(f, 0xdeadbeef12345676ul);
+  fiber_push(f, 0xdeadbeef12345677ul);
+  fiber_push(f, 0xdeadbeef12345678ul);
+  fiber_push(f, 0xdeadbeef12345679ul);
+  fiber_push(f, 0xdeadbeef1234567aul);
+  fiber_push(f, 0xdeadbeef1234567bul);
+  fiber_push(f, 0xdeadbeef1234567cul);
+  fiber_push(f, 0xdeadbeef1234567dul);
+
+  return;
+}
+
+int nk_fiber_run(nk_fiber_t *f)
+{
+  _fiber_wrapper(f); // TODO: drop f into a queue
+
+  return 0;
+}
 
 int nk_fiber_start(func, arg){
   // Call nk_fiber_create()
@@ -107,7 +155,7 @@ int nk_fiber_start(func, arg){
   // Call nk_fiber_run()
 }
 
-int nk_fiber_conditional_yield(nk_fiber_t *fib, bool (*cond_function)(void *), void *state);
+//int nk_fiber_conditional_yield(nk_fiber_t *fib, bool (*cond_function)(void *), void *state);
 
 int nk_fiber_yield();
 

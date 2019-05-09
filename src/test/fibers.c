@@ -23,6 +23,7 @@
 
 #include <nautilus/nautilus.h>
 #include <nautilus/thread.h>
+#include <nautilus/fiber.h>
 #include <nautilus/scheduler.h>
 #include <nautilus/shell.h>
 #include <nautilus/vc.h>
@@ -297,11 +298,37 @@ int test_fibers()
 
 }
 
+nk_fiber_t *f1;
+nk_fiber_t *f2;
+
+static void fiber1(void *i, void **o)
+{
+  int a = 0;
+  while(1){
+    nk_vc_printf("Fiber 1 a = %d\n", a++);
+    nk_fiber_context_switch(f1, f2);
+  }
+}
+
+static void fiber2(void *i, void **o)
+{
+  int a = 0;
+  while(1){
+    nk_vc_printf("Fiber 2 a = %d\n", a++);
+    nk_fiber_context_switch(f2, f1);
+  }
+}
+
+void _fiber_wrapper(nk_fiber_t *f);
 
 static int
 handle_fibers (char * buf, void * priv)
 {
-    test_fibers();
+    //test_fibers();
+    nk_fiber_create(fiber1, 0, 0, 0, &f1);
+    nk_fiber_create(fiber2, 0, 0, 0, &f2);
+    _fiber_wrapper(f1);
+
     return 0;
 }
 
