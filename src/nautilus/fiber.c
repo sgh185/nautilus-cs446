@@ -157,16 +157,12 @@ int nk_fiber_start(func, arg){
 
 //int nk_fiber_conditional_yield(nk_fiber_t *fib, bool (*cond_function)(void *), void *state);
 
-int nk_fiber_yield(){
+int nk_fiber_yield(){ //TODO: FIX LATER, incomplete
 	// first look to my own queue
 	f = nk_fiber_try_consume(my_cpu_id(),0,0); //TODO: implement
-	if (!f) {
-	    // then other queues
-	    f = nk_fiber_try_consume(-1,0,0); //TODO: implement
-	}
 	if (f) {
 	    // found task; run it and complete it
-	    _fiber_wrapper(f);
+	    nk_fiber_context_switch(nk_fiber_current_fiber, f);
 	    if (f->is_yielding) {
 		n = nk_fiber_try_consume(-1, 0, 0);
 		if (!n) {
