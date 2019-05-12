@@ -53,6 +53,7 @@
 #include <nautilus/thread.h>
 #include <nautilus/waitqueue.h>
 #include <nautilus/task.h>
+#include <nautilus/fiber.h>
 #include <nautilus/timer.h>
 #include <nautilus/scheduler.h>
 #include <nautilus/irq.h>
@@ -165,6 +166,10 @@
 
 // cause a GPF if this is ever followed as a pointer
 #define SCHEDULER_POISON ((void*)0xdeadbeefb000b000ULL)
+
+#if NAUT_CONFIG_FIBER_THREAD
+nk_fiber_t sched_fiber;
+#endif 
 
 //
 // Shared scheduler state
@@ -490,6 +495,7 @@ typedef struct nk_sched_thread_state {
     
     int      is_intr;      // this is an interrupt thread
     int      is_task;      // this is a task thread
+    int	     is_fiber;     // this is a fiber thread
 
     uint64_t start_time;   // when last started
     uint64_t cur_run_time; // how long it has run without being preempted
@@ -3956,6 +3962,56 @@ static int start_task_thread_for_this_cpu()
 
 #endif
 
+//TODO: add this to kconfig
+#if NAUT_CONFIG_FIBER_THREAD 
+
+static void nk_fiber_scheduler(void *in, void **out){
+    while(1) {
+        nk_fiber_yield();
+    }
+}
+
+static void fiber(void *in, void **out)
+{
+    if (nk_thread_name(get_cur_thread(),"(fiber)")) { 
+	ERROR("Failed to name fiber thread\n");
+	return;
+    }
+//TODO: Figure out if these constraints are right for fibers
+    struct nk_sched_constraints c = { .type=APERIODIC,
+				      .interrupt_priority_class=0x0, 
+				      .aperiodic.priority=NAUT_CONFIG_TASK_THREAD_PRIORITY };
+    
+    if (nk_sched_thread_change_constraints(&c)) { 
+	ERROR("Unable to set constraints for fiber thread\n");
+	panic("Unable to set constraints for fiber thread\n");
+	return;
+    }
+
+    // promote to fiber thread
+    get_cur_thread()->sched_state->is_fiber=1;
+
+    nk_fiber_create(nk_fiber_scheduler, in, out, 0, &sched_fiber);
+    nk_fiber_run(&sched_fiber);
+}
+
+static int start_fiber_thread_for_this_cpu()
+{
+  nk_thread_id_t tid;
+  
+  if (nk_thread_start(fiber, 0, 0, 1, TASK_THREAD_STACK_SIZE, &tid, my_cpu_id())) {
+      ERROR("Failed to start fiber thread\n");
+      return -1;
+  }
+
+  DEBUG("Task thread launched on cpu %d as %p\n", my_cpu_id(), tid);
+
+  return 0;
+
+}
+
+#endif
+
 
 
 static int shared_init(struct cpu *my_cpu, struct nk_sched_config *cfg)
@@ -4220,6 +4276,15 @@ void nk_sched_start()
 	return;
     }
 #endif	
+
+#ifdef NAUT_CONFIG_FIBER_THREAD
+    DEBUG("Starting task thread for CPU %d\n",my_cpu->id);
+    if (start_fiber_thread_for_this_cpu()){
+	ERROR("Cannot start fiber thread for CPU!\n");
+	panic("Cannot start fiber thread for CPU!\n");
+	return;
+    }
+#endif
 
     // this is the thread set up by the nk_sched_init/nk_sched_init_ap
     // it's the boot thread and will become the idle thread

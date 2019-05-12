@@ -157,7 +157,39 @@ int nk_fiber_start(func, arg){
 
 //int nk_fiber_conditional_yield(nk_fiber_t *fib, bool (*cond_function)(void *), void *state);
 
-int nk_fiber_yield();
+int nk_fiber_yield(){
+	// first look to my own queue
+	f = nk_fiber_try_consume(my_cpu_id(),0,0); //TODO: implement
+	if (!f) {
+	    // then other queues
+	    f = nk_fiber_try_consume(-1,0,0); //TODO: implement
+	}
+	if (f) {
+	    // found task; run it and complete it
+	    _fiber_wrapper(f);
+	    if (f->is_yielding) {
+		n = nk_fiber_try_consume(-1, 0, 0);
+		if (!n) {
+		   //something is wrong, this shouldn't happen
+		   //there should always be a fiber to switch to
+		   ERROR("There is no fiber to switch to\n");
+		   panic("There is no fiber to switch to\n");
+		   return;
+		}
+		nk_fiber_context_switch(f, n);
+	    } else {  
+		nk_fiber_complete(f);
+	    }
+	} else {
+	    // no task, let's put ourselves to sleep on our own cpu's task queues
+	    struct sys_info * sys = per_cpu_get(system);
+	    task_info *ti = &sys->cpus[my_cpu_id()]->sched_state->tasks;
+	    nk_wait_queue_sleep_extended(ti->waitq, await_task, ti);
+	    // when we wake up, we will try again
+		}
+	    }
+}
+
 
 int nk_fiber_yield_to(nk_fiber_t *fib);
 
