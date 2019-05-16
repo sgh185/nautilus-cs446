@@ -3965,7 +3965,7 @@ static int start_task_thread_for_this_cpu()
 //TODO: add this to kconfig
 #if NAUT_CONFIG_FIBER_THREAD 
 
-static void nk_fiber_scheduler(void *in, void **out){
+static void nk_fiber_idle(void *in, void **out){
     while(1) {
         nk_fiber_yield();
     }
@@ -3980,7 +3980,7 @@ static void fiber(void *in, void **out)
 //TODO: Figure out if these constraints are right for fibers
     struct nk_sched_constraints c = { .type=APERIODIC,
 				      .interrupt_priority_class=0x0, 
-				      .aperiodic.priority=NAUT_CONFIG_TASK_THREAD_PRIORITY };
+				      .aperiodic.priority=NAUT_CONFIG_FIBER_THREAD_PRIORITY }; //TODO: add kconfig
     
     if (nk_sched_thread_change_constraints(&c)) { 
 	ERROR("Unable to set constraints for fiber thread\n");
@@ -3991,20 +3991,20 @@ static void fiber(void *in, void **out)
     // promote to fiber thread
     get_cur_thread()->sched_state->is_fiber=1;
 
-    nk_fiber_create(nk_fiber_scheduler, in, out, 0, &sched_fiber);
-    nk_fiber_run(&sched_fiber);
+    nk_fiber_create(nk_fiber_idle, in, out, 0, &sched_fiber);
+    _fiber_wrapper(&sched_fiber);
 }
 
 static int start_fiber_thread_for_this_cpu()
 {
   nk_thread_id_t tid;
-  
-  if (nk_thread_start(fiber, 0, 0, 1, TASK_THREAD_STACK_SIZE, &tid, my_cpu_id())) {
+  //TODO: pick fiber thread stack size, size of idle fiber
+  if (nk_thread_start(fiber, 0, 0, 1, FIBER_THREAD_STACK_SIZE, &tid, my_cpu_id())) {
       ERROR("Failed to start fiber thread\n");
       return -1;
   }
 
-  DEBUG("Task thread launched on cpu %d as %p\n", my_cpu_id(), tid);
+  DEBUG("Fiber thread launched on cpu %d as %p\n", my_cpu_id(), tid);
 
   return 0;
 

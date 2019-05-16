@@ -144,7 +144,7 @@ void _nk_fiber_init(nk_fiber_t *f){
 
 int nk_fiber_run(nk_fiber_t *f)
 {
-  _fiber_wrapper(f); // TODO: drop f into a queue
+ // TODO: drop f into a queue
 
   return 0;
 }
