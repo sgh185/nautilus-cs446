@@ -47,6 +47,7 @@
 #define FIBER_DEBUG(fmt, args...) DEBUG_PRINT("Fiber: " fmt, ##args)
 #define FIBER_WARN(fmt, args...)  WARN_PRINT("Fiber: " fmt, ##args)
 
+
 /******** EXTERNAL INTERFACE **********/
 
 int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, nk_fiber_t **fiber_output){
@@ -115,6 +116,7 @@ void _fiber_wrapper(nk_fiber_t *f)
   FIBER_DEBUG("_fiber_wrapper BEGIN\n");
   f->fun(f->input, f->output);
   FIBER_DEBUG("_fiber_wrapper END\n");
+  _fiber_exit(f); // TODO: to implement
 
   return;
 }
@@ -157,8 +159,22 @@ int nk_fiber_start(func, arg){
 
 //int nk_fiber_conditional_yield(nk_fiber_t *fib, bool (*cond_function)(void *), void *state);
 
+nk_fiber_t *nk_fiber_current(){
+  nk_thread_t *curr_thread = nk_cur_thread();
+
+  return curr_thread->curr_fiber;
+}
+
+nk_fiber_t* rr_policy(){
+  nk_thread_t *curr_thread = nk_cur_thread();
+  nk_fiber_t *
+
+}
+
 int nk_fiber_yield(){ //TODO: FIX LATER, incomplete
 	// first look to my own queue
+
+  /*
 	f = nk_fiber_try_consume(my_cpu_id(),0,0); //TODO: implement
 	if (f) {
 	    // found task; run it and complete it
@@ -172,6 +188,13 @@ int nk_fiber_yield(){ //TODO: FIX LATER, incomplete
 		   panic("There is no fiber to switch to\n");
 		   return;
 		}
+   */
+
+  nk_fiber_t *f_to = 
+
+
+
+
 		nk_fiber_context_switch(f, n);
 	    } else {  
 		nk_fiber_complete(f);
@@ -189,12 +212,10 @@ int nk_fiber_yield(){ //TODO: FIX LATER, incomplete
 
 int nk_fiber_yield_to(nk_fiber_t *fib);
 
-nk_fiber_t *nk_fiber_current();
 
 nk_fiber_t *nk_fiber_fork();
 
 void nk_fiber_join();
 
 void nk_fiber_master_lock(nk_fiber_t *fib);
-
 
