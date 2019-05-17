@@ -50,6 +50,8 @@ typedef uint64_t nk_stack_size_t;
 #define TSTACK_1MB 0x100000
 #define TSTACK_2MB 0x200000
 
+#define MAX_QUEUE (NAUT_CONFIG_MAX_THREADS)
+
 /******** EXTERNAL INTERFACE **********/
 
 // opaque pointer given to users
@@ -89,6 +91,8 @@ typedef struct nk_fiber {
   nk_fiber_fun_t fun;
   void *input;
   void **output;
+
+  uint8_t is_done;
 } nk_fiber_t;
 
 // Create a fiber but do not launch it
@@ -124,6 +128,100 @@ void nk_fiber_join();
 void nk_fiber_master_lock(nk_fiber_t *fib);
 
 void nk_fiber_context_switch(nk_fiber_t *cur, nk_fiber_t *next);
+
+
+typedef struct fiber_queue {
+    uint64_t   size;        // number of elements currently in the queue
+    uint64_t   head;        // index of newest element 
+    uint64_t   tail;        // index of oldest element
+    nk_fiber_t *fibers[MAX_QUEUE];
+} fiber_queue ;
+
+static int        fiber_queue_enqueue(fiber_queue *queue, nk_fiber_t *fiber);
+static nk_fiber_t* fiber_queue_dequeue(fiber_queue *queue);
+static nk_fiber_t* fiber_queue_remove(fiber_queue *queue, nk_fiber_t *fiber);
+static int        fiber_queue_empty(fiber_queue *queue);
+
+static int fiber_queue_enqueue(fiber_queue *queue, nk_fiber_t *fiber)
+{
+  if (queue->size==MAX_QUEUE) {
+	  return -1;
+  } else {
+	  queue->fibers[queue->head] = fiber;
+	  queue->head = (queue->head + 1 ) % MAX_QUEUE;
+	  queue->size++;
+	  return 0;
+  }
+}
+
+static nk_fiber_t* fiber_queue_dequeue(fiber_queue *queue)
+{
+  if (queue->size==0) { 
+	  return 0;
+  } else {
+	  nk_fiber_t *fiber = queue->fibers[queue->tail];
+	  queue->tail = (queue->tail+1) % MAX_QUEUE;
+	  queue->size--;
+	  return fiber;
+  }
+}
+
+static nk_fiber_t* rt_queue_remove(fiber_queue *queue, nk_fiber_t *fiber)
+{
+  if (queue->size==0) { 
+	  return 0;
+  } else {
+	  uint64_t now, cur, next;
+
+	  for (now=0;now<queue->size;now++) { 
+	    cur = (queue->tail + now) % MAX_QUEUE;
+	    if (queue->fibers[cur] == fiber) { 
+		    break;
+	    }
+	  }
+
+	  if (now==queue->size) {
+	    // not found
+	    return 0;
+	  }
+
+	  // copy down
+	  for (;now<queue->size-1;now++) {
+	    cur = (queue->tail + now) % MAX_QUEUE;
+	    next = (queue->tail + now + 1) % MAX_QUEUE;
+	    queue->fibers[cur] = queue->fibers[next];
+	  }
+	
+	  // decrement head
+	  queue->head = (queue->head + MAX_QUEUE - 1) % MAX_QUEUE;
+    
+	  queue->size--;
+	
+	  return fiber;
+  }
+}
+
+static int fiber_queue_empty(fiber_queue *queue)
+{
+  return queue->size==0;
+}
+
+/*
+static void       fiber_queue_dump(fiber_queue *queue, char *pre);
+static void fiber_queue_dump(fiber_queue *queue, char *pre)
+{
+    int now;
+    int cur;
+    DEBUG("======%s==BEGIN=====\n",pre);
+    for (now=0;now<queue->size;now++) { 
+	cur = (queue->tail + now) % MAX_QUEUE;
+	DEBUG("   %p %d (%llu)\n",queue->fibers[cur],
+	      queue->threads[cur]->thread->is_idle ? "*idle*" : 
+	      queue->threads[cur]->thread->name[0] ? queue->threads[cur]->thread->name : "(no name)" ,queue->threads[cur]->deadline);
+    }
+    DEBUG("======%s==END=====\n",pre);
+}
+*/
 
 #endif /* !__ASSEMBLER */
 
