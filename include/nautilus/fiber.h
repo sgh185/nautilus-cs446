@@ -123,9 +123,6 @@ nk_fiber_t *nk_fiber_fork();
 // not needed for inital implementation
 void nk_fiber_join();
 
-// not needed for initial implentation, will be needed to prevent bugs
-// prevents the fiber's thread from context switching when the fiber is context switching
-void nk_fiber_master_lock(nk_fiber_t *fib);
 
 void nk_fiber_context_switch(nk_fiber_t *cur, nk_fiber_t *next);
 

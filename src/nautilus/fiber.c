@@ -111,13 +111,14 @@ fiber_push (nk_fiber_t * f, uint64_t x)
     *(uint64_t*)(f->rsp) = x;
 }
 
+void _exit_switch();
+
 void _fiber_wrapper(nk_fiber_t *f)
 {
   FIBER_DEBUG("_fiber_wrapper BEGIN\n");
   f->fun(f->input, f->output);
   FIBER_DEBUG("_fiber_wrapper END\n");
-  _fiber_exit(f); // TODO: to implement
-
+  _fiber_exit(f);
   return;
 }
 
@@ -209,6 +210,13 @@ int nk_fiber_yield(){ //TODO: FIX LATER, incomplete
 	    }
 }
 
+void _nk_fiber_exit(f){
+    extern nk_fiber_t *idle;
+    f->is_done = 1;
+    free(f->stack);
+    free(f);
+    _exit_switch(idle);
+}
 
 int nk_fiber_yield_to(nk_fiber_t *fib);
 
@@ -217,5 +225,4 @@ nk_fiber_t *nk_fiber_fork();
 
 void nk_fiber_join();
 
-void nk_fiber_master_lock(nk_fiber_t *fib);
 

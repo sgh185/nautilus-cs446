@@ -43,3 +43,9 @@ ENTRY(nk_fiber_context_switch)
 //    RESTORE_FPRS()
     FIBER_RESTORE_GPRS()
     retq
+
+ENTRY(_exit_switch)
+    movq %0x0(rdi), %rsp
+    // RESTORE_FPRS()
+    FIBER_RESTORE_GPRS()
+    retq

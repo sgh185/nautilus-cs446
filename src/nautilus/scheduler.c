@@ -168,7 +168,7 @@
 #define SCHEDULER_POISON ((void*)0xdeadbeefb000b000ULL)
 
 #if NAUT_CONFIG_FIBER_THREAD
-nk_fiber_t sched_fiber;
+nk_fiber_t idle_fiber;
 #endif 
 
 //
@@ -3991,8 +3991,8 @@ static void fiber(void *in, void **out)
     // promote to fiber thread
     get_cur_thread()->sched_state->is_fiber=1;
 
-    nk_fiber_create(nk_fiber_idle, in, out, 0, &sched_fiber);
-    _fiber_wrapper(&sched_fiber);
+    nk_fiber_create(nk_fiber_idle, in, out, 0, &idle_fiber);
+    _fiber_wrapper(&idle_fiber);
 }
 
 static int start_fiber_thread_for_this_cpu()
