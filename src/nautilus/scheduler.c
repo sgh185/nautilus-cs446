@@ -3991,7 +3991,7 @@ static void fiber(void *in, void **out)
     // promote to fiber thread
     get_cur_thread()->sched_state->is_fiber=1;
 
-    nk_fiber_create(nk_fiber_idle, in, out, 0, &idle_fiber);
+    nk_fiber_start(nk_fiber_idle, in, out, 0, &idle_fiber);
     _fiber_wrapper(&idle_fiber);
 }
 

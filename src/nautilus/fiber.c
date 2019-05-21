@@ -147,15 +147,18 @@ void _nk_fiber_init(nk_fiber_t *f){
 
 int nk_fiber_run(nk_fiber_t *f)
 {
- // TODO: drop f into a queue
+  nk_thread_t *curr_thread = nk_cur_thread();
+  nk_fiber_queue *fiber_queue = curr_thread->fiber_queue;
+  nk_fiber_t *fiber_to_schedule = fiber_queue_enqueue(fiber_queue, f);
 
   return 0;
 }
 
-int nk_fiber_start(func, arg){
-  // Call nk_fiber_create()
+int nk_fiber_start(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, nk_fiber_t **fiber_output){
+  nk_fiber_create(fun, input, output, stack_size, fiber_output);
+  nk_fiber_run(fiber_output);
 
-  // Call nk_fiber_run()
+  return 0;
 }
 
 //int nk_fiber_conditional_yield(nk_fiber_t *fib, bool (*cond_function)(void *), void *state);
@@ -168,46 +171,20 @@ nk_fiber_t *nk_fiber_current(){
 
 nk_fiber_t* rr_policy(){
   nk_thread_t *curr_thread = nk_cur_thread();
-  nk_fiber_t *
+  nk_fiber_queue *fiber_queue = curr_thread->fiber_queue;
+  nk_fiber_t *fiber_to_schedule = fiber_queue_dequeue(fiber_queue);
+  // TODO: if it is the idle fiber reinsert it into the fiber_queue (or do not dequeue it)
 
+  return fiber_to_schedule;
 }
 
-int nk_fiber_yield(){ //TODO: FIX LATER, incomplete
-	// first look to my own queue
+int nk_fiber_yield(){
+  nk_fiber_t *f_from = nk_fiber_current();
+  nk_fiber_t *f_to = rr_policy();
 
-  /*
-	f = nk_fiber_try_consume(my_cpu_id(),0,0); //TODO: implement
-	if (f) {
-	    // found task; run it and complete it
-	    nk_fiber_context_switch(nk_fiber_current_fiber, f);
-	    if (f->is_yielding) {
-		n = nk_fiber_try_consume(-1, 0, 0);
-		if (!n) {
-		   //something is wrong, this shouldn't happen
-		   //there should always be a fiber to switch to
-		   ERROR("There is no fiber to switch to\n");
-		   panic("There is no fiber to switch to\n");
-		   return;
-		}
-   */
+  nk_fiber_context_switch(f_from, f_to);
 
-  nk_fiber_t *f_to = 
-
-
-
-
-		nk_fiber_context_switch(f, n);
-	    } else {  
-		nk_fiber_complete(f);
-	    }
-	} else {
-	    // no task, let's put ourselves to sleep on our own cpu's task queues
-	    struct sys_info * sys = per_cpu_get(system);
-	    task_info *ti = &sys->cpus[my_cpu_id()]->sched_state->tasks;
-	    nk_wait_queue_sleep_extended(ti->waitq, await_task, ti);
-	    // when we wake up, we will try again
-		}
-	    }
+  return 0;
 }
 
 void _nk_fiber_exit(f){
@@ -219,7 +196,6 @@ void _nk_fiber_exit(f){
 }
 
 int nk_fiber_yield_to(nk_fiber_t *fib);
-
 
 nk_fiber_t *nk_fiber_fork();
 
