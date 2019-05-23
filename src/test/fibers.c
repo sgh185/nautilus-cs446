@@ -36,8 +36,11 @@
 #define PRINT(...) 
 #endif
 
-static void fiber1(void *i, void **o)
+struct nk_virtual_console *vc;
+
+void fiber1(void *i, void **o)
 {
+  nk_fiber_set_vc(vc);
   int a = 0;
   while(1){
     nk_vc_printf("Fiber 1 a = %d\n", a++);
@@ -45,8 +48,9 @@ static void fiber1(void *i, void **o)
   }
 }
 
-static void fiber2(void *i, void **o)
+void fiber2(void *i, void **o)
 {
+  nk_fiber_set_vc(vc);
   int a = 0;
   while(1){
     nk_vc_printf("Fiber 2 a = %d\n", a++);
@@ -58,6 +62,8 @@ int test_fibers()
 {
   nk_fiber_t *f1;
   nk_fiber_t *f2;
+  vc = get_cur_thread()->vc;
+  nk_vc_printf("test_fibers() : virtual console %p\n", vc);
   nk_fiber_start(fiber1, 0, 0, 0, &f1);
   nk_fiber_start(fiber2, 0, 0, 0, &f2);
 

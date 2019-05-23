@@ -123,6 +123,10 @@ int nk_fiber_yield(){
   // Get the fiber we are switching to
   nk_fiber_t *f_to = _rr_policy();
 
+  // Note: optimization
+  // special case: if f_to is 0, then it's the idle fiber
+  // keep running the current fiber, and enqueue back the idle fiber
+
   // Enqueue the current fiber
   nk_thread_t *cur_thread = get_cur_thread();
   fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue);
@@ -130,6 +134,10 @@ int nk_fiber_yield(){
 
   // Context switch
   nk_fiber_context_switch(f_from, f_to);
+
+  // Change thread virtual console
+  get_cur_thread()->vc = f_to->vc ;
+  //FIBER_INFO("nk_fiber_yield(): changing vc %p\n", f_to->vc);
 
   return 0;
 }
@@ -154,8 +162,16 @@ void nk_fiber_join(){
   return;
 }
 
+void nk_fiber_set_vc(struct nk_virtual_console *vc){
+  nk_fiber_t* curr_fiber = _nk_fiber_current();
+  curr_fiber->vc = vc;
+  get_cur_thread()->vc = vc;
+
+  return;
+}
 
 /******** INTERNAL INTERFACE **********/
+
 /*
  * utility function for setting up
  * a fiber's stack 

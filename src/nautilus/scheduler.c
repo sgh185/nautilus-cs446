@@ -3965,8 +3965,9 @@ static int start_task_thread_for_this_cpu()
 static void nk_fiber_idle(void *in, void **out)
 {
   while(1){
-      DEBUG("nk_fiber_idle()\n");
+      //INFO("nk_fiber_idle()\n");
       nk_fiber_yield();
+      nk_sleep(1);
   }
 
   return;
@@ -3990,6 +3991,9 @@ static void fiber(void *in, void **out)
     return;
   }
 
+  // Associate fiber thread to console thread (somehow) 
+  //get_cur_thread()->vc = get_cur_thread()->parent->vc;
+
   // Promote to fiber thread
   get_cur_thread()->sched_state->is_fiber = 1;
   
@@ -4010,7 +4014,7 @@ static int start_fiber_thread_for_this_cpu()
       return -1;
   }
 
-  DEBUG("Fiber thread launched on cpu %d as %p\n", my_cpu_id(), tid);
+  //INFO("Fiber thread launched on cpu %d as %p\n", my_cpu_id(), tid);
 
   return 0;
 }
@@ -4281,7 +4285,7 @@ void nk_sched_start()
 #endif	
 
 //#ifdef NAUT_CONFIG_FIBER_THREAD
-    DEBUG("Starting task thread for CPU %d\n",my_cpu->id);
+    //INFO("Starting fiber thread for CPU %d\n",my_cpu->id);
     if (start_fiber_thread_for_this_cpu()){
 	ERROR("Cannot start fiber thread for CPU!\n");
 	panic("Cannot start fiber thread for CPU!\n");

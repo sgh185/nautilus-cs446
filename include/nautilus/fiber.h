@@ -68,6 +68,8 @@ typedef struct nk_fiber {
   nk_stack_size_t stack_size;
   unsigned long fid; /* Fiber ID, may not be needed? */
 
+  struct nk_virtual_console *vc; // for printing
+
   /* Only necessary if we decide to implement join/wait */
   //nk_wait_queue_t *waitq; // wait queue for threads waiting on this thread
   //int num_wait;           // how many wait queues this thread is currently on
@@ -109,6 +111,9 @@ nk_fiber_t *nk_fiber_fork();
 
 // Not needed for inital implementation
 void nk_fiber_join();
+
+// Set virtual console
+void nk_fiber_set_vc(struct nk_virtual_console *vc);
 
 // TODO: condier to hide the internal interface from the user
 /******** INTERNAL INTERFACE **********/
