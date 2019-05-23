@@ -3965,6 +3965,7 @@ static int start_task_thread_for_this_cpu()
 static void nk_fiber_idle(void *in, void **out)
 {
   while(1){
+      DEBUG("nk_fiber_idle()\n");
       nk_fiber_yield();
   }
 
@@ -4279,14 +4280,14 @@ void nk_sched_start()
     }
 #endif	
 
-#ifdef NAUT_CONFIG_FIBER_THREAD
+//#ifdef NAUT_CONFIG_FIBER_THREAD
     DEBUG("Starting task thread for CPU %d\n",my_cpu->id);
     if (start_fiber_thread_for_this_cpu()){
 	ERROR("Cannot start fiber thread for CPU!\n");
 	panic("Cannot start fiber thread for CPU!\n");
 	return;
     }
-#endif
+//#endif
 
     // this is the thread set up by the nk_sched_init/nk_sched_init_ap
     // it's the boot thread and will become the idle thread
