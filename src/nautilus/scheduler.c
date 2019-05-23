@@ -75,6 +75,7 @@
 
 // task and idle threads run tasks, and so their stacks
 // need to be sized to be sensible for those tasks
+#define FIBER_THREAD_STACK_SIZE (PAGE_SIZE_2MB)
 #define TASK_THREAD_STACK_SIZE (PAGE_SIZE_2MB)
 #define IDLE_THREAD_STACK_SIZE (PAGE_SIZE_2MB)
 
@@ -166,10 +167,6 @@
 
 // cause a GPF if this is ever followed as a pointer
 #define SCHEDULER_POISON ((void*)0xdeadbeefb000b000ULL)
-
-#if NAUT_CONFIG_FIBER_THREAD
-nk_fiber_t idle_fiber;
-#endif 
 
 //
 // Shared scheduler state
@@ -3963,36 +3960,44 @@ static int start_task_thread_for_this_cpu()
 #endif
 
 //TODO: add this to kconfig
-#if NAUT_CONFIG_FIBER_THREAD 
+//#if NAUT_CONFIG_FIBER_THREAD
+ 
+static void nk_fiber_idle(void *in, void **out)
+{
+  while(1){
+      nk_fiber_yield();
+  }
 
-static void nk_fiber_idle(void *in, void **out){
-    while(1) {
-        nk_fiber_yield();
-    }
+  return;
 }
 
 static void fiber(void *in, void **out)
 {
-    if (nk_thread_name(get_cur_thread(),"(fiber)")) { 
-	ERROR("Failed to name fiber thread\n");
-	return;
-    }
-//TODO: Figure out if these constraints are right for fibers
-    struct nk_sched_constraints c = { .type=APERIODIC,
-				      .interrupt_priority_class=0x0, 
-				      .aperiodic.priority=NAUT_CONFIG_FIBER_THREAD_PRIORITY }; //TODO: add kconfig
-    
-    if (nk_sched_thread_change_constraints(&c)) { 
-	ERROR("Unable to set constraints for fiber thread\n");
-	panic("Unable to set constraints for fiber thread\n");
-	return;
-    }
+  if (nk_thread_name(get_cur_thread(),"(fiber)")) { 
+    ERROR("Failed to name fiber thread\n");
+    return;
+  }
 
-    // promote to fiber thread
-    get_cur_thread()->sched_state->is_fiber=1;
+  //TODO: Figure out if these constraints are right for fibers
+  struct nk_sched_constraints c = { .type=APERIODIC,
+            .interrupt_priority_class=0x0, 
+            .aperiodic.priority=0 }; //TODO: add kconfig
+  
+  if (nk_sched_thread_change_constraints(&c)) { 
+    ERROR("Unable to set constraints for fiber thread\n");
+    panic("Unable to set constraints for fiber thread\n");
+    return;
+  }
 
-    nk_fiber_start(nk_fiber_idle, in, out, 0, &idle_fiber);
-    _fiber_wrapper(&idle_fiber);
+  // Promote to fiber thread
+  get_cur_thread()->sched_state->is_fiber = 1;
+  
+  // Start idle fiber
+  nk_fiber_t *idle_fiber = get_cur_thread()->idle_fiber;
+  nk_fiber_start(nk_fiber_idle, 0, 0, 0, &idle_fiber);
+  _fiber_wrapper(idle_fiber);
+
+  return;
 }
 
 static int start_fiber_thread_for_this_cpu()
@@ -4007,12 +4012,9 @@ static int start_fiber_thread_for_this_cpu()
   DEBUG("Fiber thread launched on cpu %d as %p\n", my_cpu_id(), tid);
 
   return 0;
-
 }
 
-#endif
-
-
+//#endif
 
 static int shared_init(struct cpu *my_cpu, struct nk_sched_config *cfg)
 {

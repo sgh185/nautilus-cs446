@@ -54,12 +54,6 @@ typedef uint64_t nk_stack_size_t;
 
 /******** EXTERNAL INTERFACE **********/
 
-// opaque pointer given to users
-typedef void *nk_thread_id_t;
-
-// this bad id value is intended for use with fork
-// which cannot do error reporting the usual way
-#define NK_BAD_THREAD_ID ((void *)(-1ULL))
 typedef void (*nk_fiber_fun_t)(void *input, void **output);
 
 // All code above was copied from thread.h
@@ -75,18 +69,8 @@ typedef struct nk_fiber {
   unsigned long fid; /* Fiber ID, may not be needed? */
 
   /* Only necessary if we decide to implement join/wait */
-  nk_wait_queue_t *waitq; // wait queue for threads waiting on this thread
-  int num_wait;           // how many wait queues this thread is currently on
-
-  /* Current running info? */
-  int bound_cpu;
-  int placement_cpu;
-  int current_cpu;
-  uint8_t is_idle;
-
-#ifdef NAUT_CONFIG_GARBAGE_COLLECTION
-  void *gc_state;
-#endif
+  //nk_wait_queue_t *waitq; // wait queue for threads waiting on this thread
+  //int num_wait;           // how many wait queues this thread is currently on
 
   nk_fiber_fun_t fun;
   void *input;
@@ -98,35 +82,53 @@ typedef struct nk_fiber {
 // Create a fiber but do not launch it
 int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, nk_fiber_t **fiber_output);
 
+// Initialize fiber stack
+void _nk_fiber_init(nk_fiber_t *f);
+
 // Launch a previously created fiber
-int nk_fiber_run(nk_fiber_t*);
+int nk_fiber_run(nk_fiber_t *f);
 
 // Create and launch a fiber
-int nk_fiber_start(func, arg);
+int nk_fiber_start(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, nk_fiber_t **fiber_output);
 
-// takes a fiber, a condition to yield on, and a function to check that condition
-// returns 0 if the fiber does not yield
-//int nk_fiber_conditional_yield(nk_fiber_t *fib, bool (*cond_function)(void *), void *state);
-
-// default yield function; implemented on top of conditional yield
+// Default yield function, implemented on top of conditional yield
 int nk_fiber_yield();
 
-// yield that allows choice of fiber to yield to
+// Yield that allows choice of fiber to yield to
 int nk_fiber_yield_to(nk_fiber_t *fib);
 
-// returns a ptr to the current fiber
-nk_fiber_t *nk_fiber_current();
+// Takes a fiber, a condition to yield on, and a function to check that condition
+// returns 0 if the fiber does not yield
+int nk_fiber_conditional_yield(nk_fiber_t *fib, uint8_t (*cond_function)(void *), void *state);
 
-// not needed for initial implementation
+// Returns a ptr to the current fiber
+nk_fiber_t *_nk_fiber_current();
+
+// Not needed for initial implementation
 nk_fiber_t *nk_fiber_fork();
 
-// not needed for inital implementation
+// Not needed for inital implementation
 void nk_fiber_join();
 
+// TODO: condier to hide the internal interface from the user
+/******** INTERNAL INTERFACE **********/
+void _fiber_push(nk_fiber_t * f, uint64_t x);
 
-void nk_fiber_context_switch(nk_fiber_t *cur, nk_fiber_t *next);
+void _fiber_wrapper(nk_fiber_t *f);
 
+void _nk_fiber_init(nk_fiber_t *f);
 
+nk_fiber_t* _nk_fiber_current();
+
+nk_fiber_t* _nk_idle_fiber();
+
+nk_fiber_t* _rr_policy();
+
+void _nk_fiber_exit(nk_fiber_t *f);
+
+uint8_t _is_idle_fiber(nk_fiber_t *f);
+
+/******** FIBER QUEUE **********/
 typedef struct fiber_queue {
     uint64_t   size;        // number of elements currently in the queue
     uint64_t   head;        // index of newest element 
@@ -163,7 +165,7 @@ static nk_fiber_t* fiber_queue_dequeue(fiber_queue *queue)
   }
 }
 
-static nk_fiber_t* rt_queue_remove(fiber_queue *queue, nk_fiber_t *fiber)
+static nk_fiber_t* fiber_queue_remove(fiber_queue *queue, nk_fiber_t *fiber)
 {
   if (queue->size==0) { 
 	  return 0;
@@ -191,7 +193,6 @@ static nk_fiber_t* rt_queue_remove(fiber_queue *queue, nk_fiber_t *fiber)
 	
 	  // decrement head
 	  queue->head = (queue->head + MAX_QUEUE - 1) % MAX_QUEUE;
-    
 	  queue->size--;
 	
 	  return fiber;

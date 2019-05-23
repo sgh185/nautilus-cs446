@@ -47,6 +47,8 @@
 #define FIBER_DEBUG(fmt, args...) DEBUG_PRINT("Fiber: " fmt, ##args)
 #define FIBER_WARN(fmt, args...)  WARN_PRINT("Fiber: " fmt, ##args)
 
+extern void nk_fiber_context_switch(nk_fiber_t *cur, nk_fiber_t *next);
+extern void _exit_switch(nk_fiber_t *next);
 
 /******** EXTERNAL INTERFACE **********/
 
@@ -88,8 +90,6 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
   fiber->input = input;
   fiber->output = output;
 
-  // Set some INIT_FIBER status (?)
-
   _nk_fiber_init(fiber);
 
   // Return the fiber
@@ -100,105 +100,155 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
   return 0;
 }
 
-/*
- * utility function for setting up
- * a thread's stack 
- */
-static inline void
-fiber_push (nk_fiber_t * f, uint64_t x)
-{
-    f->rsp -= 8;
-    *(uint64_t*)(f->rsp) = x;
-}
-
-void _exit_switch();
-
-void _fiber_wrapper(nk_fiber_t *f)
-{
-  FIBER_DEBUG("_fiber_wrapper BEGIN\n");
-  f->fun(f->input, f->output);
-  FIBER_DEBUG("_fiber_wrapper END\n");
-  _fiber_exit(f);
-  return;
-}
-
-void _nk_fiber_init(nk_fiber_t *f){
-  // Setup stack
-  f->rsp = (uint64_t) f->stack + f->stack_size;
-  fiber_push(f, _fiber_wrapper);
-  fiber_push(f, 0xdeadbeef12345670ul);
-  fiber_push(f, 0xdeadbeef12345671ul);
-  fiber_push(f, 0xdeadbeef12345672ul);
-  fiber_push(f, 0xdeadbeef12345673ul);
-  fiber_push(f, 0xdeadbeef12345674ul);
-  fiber_push(f, (uint64_t) f);
-  fiber_push(f, 0xdeadbeef12345675ul);
-  fiber_push(f, 0xdeadbeef12345676ul);
-  fiber_push(f, 0xdeadbeef12345677ul);
-  fiber_push(f, 0xdeadbeef12345678ul);
-  fiber_push(f, 0xdeadbeef12345679ul);
-  fiber_push(f, 0xdeadbeef1234567aul);
-  fiber_push(f, 0xdeadbeef1234567bul);
-  fiber_push(f, 0xdeadbeef1234567cul);
-  fiber_push(f, 0xdeadbeef1234567dul);
-
-  return;
-}
-
 int nk_fiber_run(nk_fiber_t *f)
 {
-  nk_thread_t *curr_thread = nk_cur_thread();
-  nk_fiber_queue *fiber_queue = curr_thread->fiber_queue;
-  nk_fiber_t *fiber_to_schedule = fiber_queue_enqueue(fiber_queue, f);
+  nk_thread_t *curr_thread = get_cur_thread();
+  fiber_queue *fiber_sched_queue = &(curr_thread->fiber_sched_queue);
+  fiber_queue_enqueue(fiber_sched_queue, f);
 
   return 0;
 }
 
 int nk_fiber_start(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, nk_fiber_t **fiber_output){
   nk_fiber_create(fun, input, output, stack_size, fiber_output);
-  nk_fiber_run(fiber_output);
+  nk_fiber_run(*fiber_output);
 
   return 0;
 }
 
-//int nk_fiber_conditional_yield(nk_fiber_t *fib, bool (*cond_function)(void *), void *state);
-
-nk_fiber_t *nk_fiber_current(){
-  nk_thread_t *curr_thread = nk_cur_thread();
-
-  return curr_thread->curr_fiber;
-}
-
-nk_fiber_t* rr_policy(){
-  nk_thread_t *curr_thread = nk_cur_thread();
-  nk_fiber_queue *fiber_queue = curr_thread->fiber_queue;
-  nk_fiber_t *fiber_to_schedule = fiber_queue_dequeue(fiber_queue);
-  // TODO: if it is the idle fiber reinsert it into the fiber_queue (or do not dequeue it)
-
-  return fiber_to_schedule;
-}
-
 int nk_fiber_yield(){
-  nk_fiber_t *f_from = nk_fiber_current();
-  nk_fiber_t *f_to = rr_policy();
+  // Get the current fiber
+  nk_fiber_t *f_from = _nk_fiber_current();
 
+  // Get the fiber we are switching to
+  nk_fiber_t *f_to = _rr_policy();
+
+  // Enqueue the current fiber
+  nk_thread_t *cur_thread = get_cur_thread();
+  fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue);
+  fiber_queue_enqueue(fiber_sched_queue, f_from);
+
+  // Context switch
   nk_fiber_context_switch(f_from, f_to);
 
   return 0;
 }
 
-void _nk_fiber_exit(f){
-    extern nk_fiber_t *idle;
-    f->is_done = 1;
-    free(f->stack);
-    free(f);
-    _exit_switch(idle);
+int nk_fiber_yield_to(nk_fiber_t *fib){
+
+  return 0;
 }
 
-int nk_fiber_yield_to(nk_fiber_t *fib);
+int nk_fiber_conditional_yield(nk_fiber_t *fib, uint8_t (*cond_function)(void *), void *state){
 
-nk_fiber_t *nk_fiber_fork();
+  return 0;
+}
 
-void nk_fiber_join();
+nk_fiber_t *nk_fiber_fork(){
 
+  return NULL;
+}
+
+void nk_fiber_join(){
+
+  return;
+}
+
+
+/******** INTERNAL INTERFACE **********/
+/*
+ * utility function for setting up
+ * a fiber's stack 
+ */
+void _fiber_push(nk_fiber_t * f, uint64_t x){
+    f->rsp -= 8;
+    *(uint64_t*)(f->rsp) = x;
+}
+
+void _fiber_wrapper(nk_fiber_t *f){
+  // Set current fiber
+  nk_thread_t *curr_thread = get_cur_thread();
+  curr_thread->curr_fiber = f;
+
+  // Execute fiber function
+  FIBER_DEBUG("_fiber_wrapper BEGIN\n");
+  f->fun(f->input, f->output);
+  FIBER_DEBUG("_fiber_wrapper END\n");
+
+  // Exit when fiber function ends
+  _nk_fiber_exit(f);
+
+  return;
+}
+
+void _nk_fiber_init(nk_fiber_t *f){
+  // Setup stack
+  f->rsp = (uint64_t) f->stack + f->stack_size;
+  _fiber_push(f, (uint64_t) _fiber_wrapper);
+  _fiber_push(f, 0xdeadbeef12345670ul);
+  _fiber_push(f, 0xdeadbeef12345671ul);
+  _fiber_push(f, 0xdeadbeef12345672ul);
+  _fiber_push(f, 0xdeadbeef12345673ul);
+  _fiber_push(f, 0xdeadbeef12345674ul);
+  _fiber_push(f, (uint64_t) f);
+  _fiber_push(f, 0xdeadbeef12345675ul);
+  _fiber_push(f, 0xdeadbeef12345676ul);
+  _fiber_push(f, 0xdeadbeef12345677ul);
+  _fiber_push(f, 0xdeadbeef12345678ul);
+  _fiber_push(f, 0xdeadbeef12345679ul);
+  _fiber_push(f, 0xdeadbeef1234567aul);
+  _fiber_push(f, 0xdeadbeef1234567bul);
+  _fiber_push(f, 0xdeadbeef1234567cul);
+  _fiber_push(f, 0xdeadbeef1234567dul);
+
+  return;
+}
+
+nk_fiber_t* _nk_fiber_current(){
+  nk_thread_t *curr_thread = get_cur_thread();
+
+  return curr_thread->curr_fiber;
+}
+
+nk_fiber_t* _nk_idle_fiber(){
+  nk_thread_t *curr_thread = get_cur_thread();
+
+  return curr_thread->idle_fiber;
+}
+
+nk_fiber_t* _rr_policy(){
+  nk_thread_t *cur_thread = get_cur_thread();
+  fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue);
+  nk_fiber_t *fiber_to_schedule = fiber_queue_dequeue(fiber_sched_queue);
+
+  // If it is the idle fiber reinsert it into the fiber_queue (or do not dequeue it)
+  uint8_t idle_fiber_check = _is_idle_fiber(fiber_to_schedule);
+  if (idle_fiber_check){
+    nk_fiber_t *idle_fiber = _nk_idle_fiber();
+    fiber_queue_enqueue(fiber_sched_queue, idle_fiber);
+  }
+
+  return fiber_to_schedule;
+}
+
+void _nk_fiber_exit(nk_fiber_t *f){
+  nk_fiber_t *idle = _nk_idle_fiber();
+  f->is_done = 1;
+  free(f->stack);
+  free(f);
+  _exit_switch(idle);
+
+  return;
+}
+
+uint8_t _is_idle_fiber(nk_fiber_t *f){
+  nk_fiber_t *idle_fiber = _nk_idle_fiber();
+
+  uint8_t result = 0;
+  if (idle_fiber == f){
+    result = 1;
+  }
+ 
+  return result; 
+}
 

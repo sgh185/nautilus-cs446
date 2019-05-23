@@ -41,6 +41,8 @@ typedef uint64_t nk_stack_size_t;
     
 #include <nautilus/scheduler.h>
 
+#include <nautilus/fiber.h>
+
 #define CPU_ANY       -1
 
 /* common thread stack sizes */
@@ -180,8 +182,9 @@ struct nk_thread {
              cache_part_state;   /* Always included to reserve this "slot" for asm code */
 
     /* Fibers related fields */
+    nk_fiber_t *idle_fiber;
     nk_fiber_t *curr_fiber;
-    nk_queue_t fiber_sched_queue;
+    fiber_queue fiber_sched_queue;
 
     nk_stack_size_t stack_size;
     unsigned long tid;
