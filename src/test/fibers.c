@@ -66,7 +66,7 @@ int test_fibers()
   nk_vc_printf("test_fibers() : virtual console %p\n", vc);
   nk_fiber_start(fiber1, 0, 0, 0, &f1);
   nk_fiber_start(fiber2, 0, 0, 0, &f2);
-
+  nk_vc_printf("test_fibers() : gets to point after fiber_starts");
   return 0;
 }
 

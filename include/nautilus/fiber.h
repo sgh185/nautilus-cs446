@@ -39,6 +39,7 @@ extern "C" {
 #include <nautilus/cachepart.h>
 
 #include <nautilus/scheduler.h>
+#include <nautilus/thread.h>
 
 typedef uint64_t nk_stack_size_t;
 
@@ -133,6 +134,8 @@ void _nk_fiber_exit(nk_fiber_t *f);
 
 uint8_t _is_idle_fiber(nk_fiber_t *f);
 
+struct nk_thread* _get_fiber_thread();
+
 /******** FIBER QUEUE **********/
 typedef struct fiber_queue {
     uint64_t   size;        // number of elements currently in the queue
@@ -141,7 +144,7 @@ typedef struct fiber_queue {
     nk_fiber_t *fibers[MAX_QUEUE];
 } fiber_queue ;
 
-static int        fiber_queue_enqueue(fiber_queue *queue, nk_fiber_t *fiber);
+static int fiber_queue_enqueue(fiber_queue *queue, nk_fiber_t *fiber);
 static nk_fiber_t* fiber_queue_dequeue(fiber_queue *queue);
 static nk_fiber_t* fiber_queue_remove(fiber_queue *queue, nk_fiber_t *fiber);
 static int        fiber_queue_empty(fiber_queue *queue);
