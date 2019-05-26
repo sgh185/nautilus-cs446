@@ -3998,9 +3998,12 @@ static void fiber(void *in, void **out)
   get_cur_thread()->sched_state->is_fiber = 1;
   
   // Start idle fiber
-  nk_fiber_t *idle_fiber = get_cur_thread()->idle_fiber;
-  nk_fiber_start(nk_fiber_idle, 0, 0, 0, &idle_fiber);
-  _fiber_wrapper(idle_fiber);
+  get_cpu()->fiber_thread = get_cur_thread();
+  nk_fiber_t *idle_fiber_ptr;
+  nk_fiber_start(nk_fiber_idle, 0, 0, 0, &idle_fiber_ptr);
+  get_cur_thread()->curr_fiber = idle_fiber_ptr;
+  get_cur_thread()->idle_fiber = idle_fiber_ptr;
+  _fiber_wrapper(idle_fiber_ptr);
 
   return;
 }

@@ -39,9 +39,10 @@ extern "C" {
 #include <nautilus/cachepart.h>
 
 #include <nautilus/scheduler.h>
+#include <nautilus/thread.h>
 
 typedef uint64_t nk_stack_size_t;
-
+typedef struct nk_thread nk_thread_t;
 #define CPU_ANY -1
 
 /* common thread stack sizes */
@@ -119,7 +120,7 @@ void nk_fiber_set_vc(struct nk_virtual_console *vc);
 /******** INTERNAL INTERFACE **********/
 void _fiber_push(nk_fiber_t * f, uint64_t x);
 
-void _fiber_wrapper(nk_fiber_t *f);
+void _fiber_wrapper();
 
 void _nk_fiber_init(nk_fiber_t *f);
 
@@ -132,6 +133,8 @@ nk_fiber_t* _rr_policy();
 void _nk_fiber_exit(nk_fiber_t *f);
 
 uint8_t _is_idle_fiber(nk_fiber_t *f);
+
+nk_thread_t* _get_fiber_thread();
 
 /******** FIBER QUEUE **********/
 typedef struct fiber_queue {

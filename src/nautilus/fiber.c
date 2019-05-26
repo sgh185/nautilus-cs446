@@ -102,7 +102,7 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
 
 int nk_fiber_run(nk_fiber_t *f)
 {
-  nk_thread_t *curr_thread = get_cur_thread();
+  nk_thread_t *curr_thread = _get_fiber_thread();
   fiber_queue *fiber_sched_queue = &(curr_thread->fiber_sched_queue);
   fiber_queue_enqueue(fiber_sched_queue, f);
 
@@ -128,15 +128,19 @@ int nk_fiber_yield(){
   // keep running the current fiber, and enqueue back the idle fiber
 
   // Enqueue the current fiber
-  nk_thread_t *cur_thread = get_cur_thread();
-  fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue);
-  fiber_queue_enqueue(fiber_sched_queue, f_from);
+  if(f_from != f_to) {
+    nk_thread_t *cur_thread = _get_fiber_thread();
+    fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue);
+    fiber_queue_enqueue(fiber_sched_queue, f_from);
+  }
 
   // Context switch
+  //MAC: we may want to change the curr_fiber's current fiber instead!
+  _get_fiber_thread()->curr_fiber = f_to;
   nk_fiber_context_switch(f_from, f_to);
 
   // Change thread virtual console
-  get_cur_thread()->vc = f_to->vc ;
+  //_get_fiber_thread()->vc = f_to->vc ;
   //FIBER_INFO("nk_fiber_yield(): changing vc %p\n", f_to->vc);
 
   return 0;
@@ -165,7 +169,7 @@ void nk_fiber_join(){
 void nk_fiber_set_vc(struct nk_virtual_console *vc){
   nk_fiber_t* curr_fiber = _nk_fiber_current();
   curr_fiber->vc = vc;
-  get_cur_thread()->vc = vc;
+  _get_fiber_thread()->vc = vc;
 
   return;
 }
@@ -181,18 +185,21 @@ void _fiber_push(nk_fiber_t * f, uint64_t x){
     *(uint64_t*)(f->rsp) = x;
 }
 
-void _fiber_wrapper(nk_fiber_t *f){
+void _fiber_wrapper(){
   // Set current fiber
-  nk_thread_t *curr_thread = get_cur_thread();
-  curr_thread->curr_fiber = f;
+  nk_fiber_t * f_to;
+  //MAC: this may be a bad decision. This sets the fiber thread's curr fiber
+  // we may want to set the curr thread's curr_fiber, not sure yet!
+  // would require that we change nk_fiber_yield too 
+  f_to = _get_fiber_thread()->curr_fiber
 
   // Execute fiber function
   FIBER_DEBUG("_fiber_wrapper BEGIN\n");
-  f->fun(f->input, f->output);
+  f_to->fun(f_to->input, f_to->output);
   FIBER_DEBUG("_fiber_wrapper END\n");
 
   // Exit when fiber function ends
-  _nk_fiber_exit(f);
+  _nk_fiber_exit(f_to);
 
   return;
 }
@@ -221,19 +228,19 @@ void _nk_fiber_init(nk_fiber_t *f){
 }
 
 nk_fiber_t* _nk_fiber_current(){
-  nk_thread_t *curr_thread = get_cur_thread();
+  nk_thread_t *curr_thread = _get_fiber_thread();
 
   return curr_thread->curr_fiber;
 }
 
 nk_fiber_t* _nk_idle_fiber(){
-  nk_thread_t *curr_thread = get_cur_thread();
+  nk_thread_t *curr_thread = _get_fiber_thread();
 
   return curr_thread->idle_fiber;
 }
 
 nk_fiber_t* _rr_policy(){
-  nk_thread_t *cur_thread = get_cur_thread();
+  nk_thread_t *cur_thread = _get_fiber_thread();
   fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue);
   nk_fiber_t *fiber_to_schedule = fiber_queue_dequeue(fiber_sched_queue);
 
@@ -268,3 +275,6 @@ uint8_t _is_idle_fiber(nk_fiber_t *f){
   return result; 
 }
 
+nk_thread_t *_get_fiber_thread(){
+  return (nk_thread_t*)(get_cpu()->fiber_thread);
+}
