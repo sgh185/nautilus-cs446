@@ -96,7 +96,8 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
   if (fiber_output){
     *fiber_output = fiber;
   }
-
+  
+  fiber->fid = fiber;
   return 0;
 }
 
@@ -104,6 +105,7 @@ int nk_fiber_run(nk_fiber_t *f)
 {
   nk_thread_t *curr_thread = _get_fiber_thread();
   fiber_queue *fiber_sched_queue = &(curr_thread->fiber_sched_queue);
+  FIBER_INFO("nk_fiber_run() : about to enqueue a fiber: %p\n", f); 
   fiber_queue_enqueue(fiber_sched_queue, f);
 
   return 0;
@@ -119,24 +121,27 @@ int nk_fiber_start(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size
 int nk_fiber_yield(){
   // Get the current fiber
   nk_fiber_t *f_from = _nk_fiber_current();
-
+  FIBER_INFO("Current queue size is %d\n", _get_fiber_thread()->fiber_sched_queue.size);
   // Get the fiber we are switching to
   nk_fiber_t *f_to = _rr_policy();
-
+  //checks if there are no fibers in the queue. If this is the case, the idle fiber is the only fiber in the queue
+  if(f_to == 0){
+    return 0;
+  }
   // Note: optimization
   // special case: if f_to is 0, then it's the idle fiber
   // keep running the current fiber, and enqueue back the idle fiber
 
   // Enqueue the current fiber
-  if(f_from != f_to) {
+  if(f_from->fid != f_to->fid) {
     nk_thread_t *cur_thread = _get_fiber_thread();
     fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue);
+    FIBER_INFO("nk_fiber_yield() : About to enqueue fiber: %p \n", f_from);
     fiber_queue_enqueue(fiber_sched_queue, f_from);
   }
 
   // Context switch
-  //MAC: we may want to change the curr_fiber's current fiber instead!
-  _get_fiber_thread()->curr_fiber = f_to;
+  get_cur_thread()->curr_fiber = f_to;
   nk_fiber_context_switch(f_from, f_to);
 
   // Change thread virtual console
@@ -169,7 +174,7 @@ void nk_fiber_join(){
 void nk_fiber_set_vc(struct nk_virtual_console *vc){
   nk_fiber_t* curr_fiber = _nk_fiber_current();
   curr_fiber->vc = vc;
-  _get_fiber_thread()->vc = vc;
+  get_cur_thread()->vc = vc;
 
   return;
 }
@@ -185,13 +190,9 @@ void _fiber_push(nk_fiber_t * f, uint64_t x){
     *(uint64_t*)(f->rsp) = x;
 }
 
-void _fiber_wrapper(){
+void _fiber_wrapper(nk_fiber_t* f_to){
   // Set current fiber
-  nk_fiber_t * f_to;
-  //MAC: this may be a bad decision. This sets the fiber thread's curr fiber
-  // we may want to set the curr thread's curr_fiber, not sure yet!
-  // would require that we change nk_fiber_yield too 
-  f_to = _get_fiber_thread()->curr_fiber
+  //get_cur_thread()->curr_fiber = f_to;
 
   // Execute fiber function
   FIBER_DEBUG("_fiber_wrapper BEGIN\n");
@@ -199,6 +200,8 @@ void _fiber_wrapper(){
   FIBER_DEBUG("_fiber_wrapper END\n");
 
   // Exit when fiber function ends
+  //MAC: This is kind of a messy fix, maybe we can find a better way to avoid adding the fiber back into the queue
+  get_cur_thread()->curr_fiber = _nk_idle_fiber();
   _nk_fiber_exit(f_to);
 
   return;
@@ -228,7 +231,7 @@ void _nk_fiber_init(nk_fiber_t *f){
 }
 
 nk_fiber_t* _nk_fiber_current(){
-  nk_thread_t *curr_thread = _get_fiber_thread();
+  nk_thread_t *curr_thread = get_cur_thread();
 
   return curr_thread->curr_fiber;
 }
@@ -241,14 +244,19 @@ nk_fiber_t* _nk_idle_fiber(){
 
 nk_fiber_t* _rr_policy(){
   nk_thread_t *cur_thread = _get_fiber_thread();
-  fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue);
+  fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue); 
   nk_fiber_t *fiber_to_schedule = fiber_queue_dequeue(fiber_sched_queue);
-
+  FIBER_INFO("_rr_policy() : just dequeued a fiber : %p\n", fiber_to_schedule); 
+  
+  if(fiber_to_schedule == 0){
+    return fiber_to_schedule;
+  }
   // If it is the idle fiber reinsert it into the fiber_queue (or do not dequeue it)
   uint8_t idle_fiber_check = _is_idle_fiber(fiber_to_schedule);
   if (idle_fiber_check){
     nk_fiber_t *idle_fiber = _nk_idle_fiber();
-    fiber_queue_enqueue(fiber_sched_queue, idle_fiber);
+    //FIBER_INFO("_rr_policy() : about to enqueue a fiber: %p\n", idle_fiber); 
+    //fiber_queue_enqueue(fiber_sched_queue, idle_fiber);
   }
 
   return fiber_to_schedule;

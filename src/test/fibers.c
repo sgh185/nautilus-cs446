@@ -38,35 +38,68 @@
 
 struct nk_virtual_console *vc;
 
+void fiber4(void *i, void **o)
+{
+  nk_fiber_set_vc(vc);
+  int a = 0;
+  while(a < 20){
+    nk_vc_printf("Fiber 4 a = %d\n", a++);
+    nk_fiber_yield();
+  }
+  nk_vc_printf("Fiber 4 is finished, a = %d\n", a);
+}
+
+
+void fiber3(void *i, void **o)
+{
+  nk_fiber_set_vc(vc);
+  int a = 0;
+  while(a < 5){
+    nk_vc_printf("Fiber 3 a = %d\n", a++);
+    nk_fiber_yield();
+  }
+  nk_vc_printf("Fiber 3 is finished, a = %d\n", a);
+  nk_fiber_t *f4;
+  nk_fiber_start(fiber4, 0, 0, 0, &f4);
+}
+
 void fiber1(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
   int a = 0;
-  while(1){
+  while(a < 10){
     nk_vc_printf("Fiber 1 a = %d\n", a++);
     nk_fiber_yield();
   }
+  nk_vc_printf("Fiber 1 is finished, a = %d\n", a);
+  nk_fiber_t *f3;
+  nk_fiber_start(fiber3, 0, 0, 0, &f3);
 }
+
 
 void fiber2(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
   int a = 0;
-  while(1){
+  while(a < 20){
     nk_vc_printf("Fiber 2 a = %d\n", a++);
     nk_fiber_yield();
   }
+  nk_vc_printf("Fiber 2 is finished, a = %d\n", a);
+  nk_fiber_t *f4;
+  nk_fiber_start(fiber4, 0, 0, 0, &f4);
 }
 
 int test_fibers()
 {
   nk_fiber_t *f1;
   nk_fiber_t *f2;
+  nk_fiber_t *f3;
   vc = get_cur_thread()->vc;
   nk_vc_printf("test_fibers() : virtual console %p\n", vc);
   nk_fiber_start(fiber1, 0, 0, 0, &f1);
   nk_fiber_start(fiber2, 0, 0, 0, &f2);
-
+  nk_fiber_start(fiber3, 0, 0, 0, &f3);
   return 0;
 }
 

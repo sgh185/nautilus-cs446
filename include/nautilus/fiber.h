@@ -120,7 +120,7 @@ void nk_fiber_set_vc(struct nk_virtual_console *vc);
 /******** INTERNAL INTERFACE **********/
 void _fiber_push(nk_fiber_t * f, uint64_t x);
 
-void _fiber_wrapper();
+void _fiber_wrapper(nk_fiber_t * f_to);
 
 void _nk_fiber_init(nk_fiber_t *f);
 
