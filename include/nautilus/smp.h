@@ -85,7 +85,7 @@ struct cpu {
     uint64_t interrupt_count;                  /* +16 PAD: DO NOT MOVE */
     uint64_t exception_count;                  /* +24 PAD: DO NOT MOVE */
 
-    struct nk_thread *fiber_thread; // Pointer to the fiber thread for this CPU
+    struct nk_thread * fiber_thread; // Pointer to the fiber thread for this CPU
     cpu_id_t id;
     uint32_t lapic_id;   
     uint8_t enabled;

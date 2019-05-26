@@ -4000,11 +4000,11 @@ static void fiber(void *in, void **out)
   get_cur_thread()->fiber_sched_queue.tail = 0;
   get_cur_thread()->fiber_sched_queue.size = 0;
   // Start idle fiber
+  get_cpu()->fiber_thread = get_cur_thread();
   nk_fiber_t *idle_fiber_ptr;
   nk_fiber_start(nk_fiber_idle, 0, 0, 0, &idle_fiber_ptr);
   get_cur_thread()->idle_fiber = idle_fiber_ptr;
   get_cur_thread()->curr_fiber = idle_fiber_ptr;
-  get_cpu()->fiber_thread = get_cur_thread();
   _fiber_wrapper(idle_fiber_ptr);
   //nk_fiber_yield();
 
@@ -4020,7 +4020,7 @@ static int start_fiber_thread_for_this_cpu()
       return -1;
   }
 
-  //INFO("Fiber thread launched on cpu %d as %p\n", my_cpu_id(), tid);
+  INFO("Fiber thread launched on cpu %d as %p\n", my_cpu_id(), tid);
 
   return 0;
 }
