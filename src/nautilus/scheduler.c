@@ -3967,7 +3967,9 @@ static void nk_fiber_idle(void *in, void **out)
   while(1){
       //INFO("nk_fiber_idle()\n");
       nk_fiber_yield();
-      nk_sleep(1);
+      INFO("nk_fiber_idle() : going to sleep\n");
+      nk_sleep(100000);
+      INFO("nk_fiber-idle() : waking up\n");
   }
 
   return;

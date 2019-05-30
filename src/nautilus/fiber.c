@@ -107,7 +107,10 @@ int nk_fiber_run(nk_fiber_t *f)
   fiber_queue *fiber_sched_queue = &(curr_thread->fiber_sched_queue);
   FIBER_INFO("nk_fiber_run() : about to enqueue a fiber: %p\n", f); 
   fiber_queue_enqueue(fiber_sched_queue, f);
-
+  if(curr_thread->timer){
+    FIBER_INFO("nk_fiber_run() : waking fiber thread\n");
+    nk_timer_cancel(curr_thread->timer);
+  }
   return 0;
 }
 
