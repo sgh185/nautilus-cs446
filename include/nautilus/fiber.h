@@ -89,10 +89,10 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
 void _nk_fiber_init(nk_fiber_t *f);
 
 // Launch a previously created fiber
-int nk_fiber_run(nk_fiber_t *f);
+int nk_fiber_run(nk_fiber_t *f, uint8_t random_cpu_flag);
 
 // Create and launch a fiber
-int nk_fiber_start(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, nk_fiber_t **fiber_output);
+int nk_fiber_start(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, uint8_t random_cpu_flag, nk_fiber_t **fiber_output);
 
 // Default yield function, implemented on top of conditional yield
 int nk_fiber_yield();
@@ -133,6 +133,8 @@ nk_fiber_t* _rr_policy();
 void _nk_fiber_exit(nk_fiber_t *f);
 
 uint8_t _is_idle_fiber(nk_fiber_t *f);
+
+nk_thread_t *_get_random_fiber_thread();
 
 nk_thread_t* _get_fiber_thread();
 

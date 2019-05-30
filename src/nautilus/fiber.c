@@ -37,6 +37,7 @@
 #include <nautilus/list.h>
 #include <nautilus/errno.h>
 #include <nautilus/mm.h>
+#include <nautilus/random.h>
 
 #ifndef NAUT_CONFIG_DEBUG_FIBERS
 #undef  DEBUG_PRINT
@@ -101,22 +102,27 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
   return 0;
 }
 
-int nk_fiber_run(nk_fiber_t *f)
+int nk_fiber_run(nk_fiber_t *f, uint8_t random_cpu_flag)
 {
   nk_thread_t *curr_thread = _get_fiber_thread();
+  if (random_cpu_flag){
+    curr_thread = _get_random_fiber_thread();
+  }
+
   fiber_queue *fiber_sched_queue = &(curr_thread->fiber_sched_queue);
-  FIBER_INFO("nk_fiber_run() : about to enqueue a fiber: %p\n", f); 
+  FIBER_INFO("nk_fiber_run() : about to enqueue a fiber: %p cpu: %d\n", f, curr_thread->current_cpu); 
   fiber_queue_enqueue(fiber_sched_queue, f);
   if(curr_thread->timer){
     FIBER_INFO("nk_fiber_run() : waking fiber thread\n");
+    FIBER_INFO("nk_fiber_run() : curr_thread = %p %s timer = %p %s cpu = %d \n", curr_thread, curr_thread->name, curr_thread->timer, curr_thread->timer->name, curr_thread->current_cpu);
     nk_timer_cancel(curr_thread->timer);
   }
   return 0;
 }
 
-int nk_fiber_start(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, nk_fiber_t **fiber_output){
+int nk_fiber_start(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, uint8_t random_cpu_flag, nk_fiber_t **fiber_output){
   nk_fiber_create(fun, input, output, stack_size, fiber_output);
-  nk_fiber_run(*fiber_output);
+  nk_fiber_run(*fiber_output, random_cpu_flag);
 
   return 0;
 }
@@ -286,6 +292,25 @@ uint8_t _is_idle_fiber(nk_fiber_t *f){
   return result; 
 }
 
+static inline uint64_t _get_random()
+{
+    uint64_t t;
+    nk_get_rand_bytes((uint8_t *)&t,sizeof(t));
+    return t;
+}
+
+static int _nk_initial_placement()
+{
+    struct sys_info * sys = per_cpu_get(system);
+    return (int)(_get_random() % sys->num_cpus);
+}
+
+nk_thread_t *_get_random_fiber_thread(){
+  int random_cpu = _nk_initial_placement();
+  struct sys_info * sys = per_cpu_get(system);
+  return sys->cpus[random_cpu]->fiber_thread;
+}
+
 nk_thread_t *_get_fiber_thread(){
-  return (nk_thread_t*)(get_cpu()->fiber_thread);
+  return get_cpu()->fiber_thread;
 }

@@ -3968,7 +3968,7 @@ static void nk_fiber_idle(void *in, void **out)
       //INFO("nk_fiber_idle()\n");
       nk_fiber_yield();
       INFO("nk_fiber_idle() : going to sleep\n");
-      nk_sleep(100000);
+      nk_sleep(1000000);
       INFO("nk_fiber-idle() : waking up\n");
   }
 
@@ -4002,7 +4002,7 @@ static void fiber(void *in, void **out)
   // Start idle fiber
   get_cpu()->fiber_thread = get_cur_thread();
   nk_fiber_t *idle_fiber_ptr;
-  nk_fiber_start(nk_fiber_idle, 0, 0, 0, &idle_fiber_ptr);
+  nk_fiber_start(nk_fiber_idle, 0, 0, 0, 0, &idle_fiber_ptr);
   get_cur_thread()->curr_fiber = idle_fiber_ptr;
   get_cur_thread()->idle_fiber = idle_fiber_ptr;
   _fiber_wrapper(idle_fiber_ptr);

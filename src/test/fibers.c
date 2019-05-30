@@ -56,7 +56,7 @@ void fiber_outer(void *i, void **o)
   while(a < 3){
     nk_vc_printf("Fiber outer a = %d\n", a++);
     nk_fiber_t *f_inner;
-    nk_fiber_start(fiber_inner, 0, 0, 0, &f_inner);
+    nk_fiber_start(fiber_inner, 0, 0, 0, 1, &f_inner);
     nk_fiber_yield();
   }
   nk_vc_printf("Fiber outer is finished, a = %d\n", a);
@@ -84,7 +84,7 @@ void fiber3(void *i, void **o)
   }
   nk_vc_printf("Fiber 3 is finished, a = %d\n", a);
   nk_fiber_t *f4;
-  nk_fiber_start(fiber4, 0, 0, 0, &f4);
+  nk_fiber_start(fiber4, 0, 0, 0, 1, &f4);
 }
 
 void fiber1(void *i, void **o)
@@ -97,7 +97,7 @@ void fiber1(void *i, void **o)
   }
   nk_vc_printf("Fiber 1 is finished, a = %d\n", a);
   nk_fiber_t *f3;
-  nk_fiber_start(fiber3, 0, 0, 0, &f3);
+  nk_fiber_start(fiber3, 0, 0, 0, 1, &f3);
 }
 
 
@@ -111,7 +111,7 @@ void fiber2(void *i, void **o)
   }
   nk_vc_printf("Fiber 2 is finished, a = %d\n", a);
   nk_fiber_t *f4;
-  nk_fiber_start(fiber4, 0, 0, 0, &f4);
+  nk_fiber_start(fiber4, 0, 0, 0, 1, &f4);
 }
 
 int test_nested_fibers()
@@ -119,7 +119,7 @@ int test_nested_fibers()
   nk_fiber_t *f_outer;
   vc = get_cur_thread()->vc;
   nk_vc_printf("test_nested_fibers() : virtual console %p\n", vc);
-  nk_fiber_start(fiber_outer, 0, 0, 0, &f_outer);
+  nk_fiber_start(fiber_outer, 0, 0, 0, 1, &f_outer);
   return 0;
 }
 
@@ -130,9 +130,9 @@ int test_fibers()
   nk_fiber_t *f3;
   vc = get_cur_thread()->vc;
   nk_vc_printf("test_fibers() : virtual console %p\n", vc);
-  nk_fiber_start(fiber1, 0, 0, 0, &f1);
-  nk_fiber_start(fiber2, 0, 0, 0, &f2);
-  nk_fiber_start(fiber3, 0, 0, 0, &f3);
+  nk_fiber_start(fiber1, 0, 0, 0, 1, &f1);
+  nk_fiber_start(fiber2, 0, 0, 0, 1, &f2);
+  nk_fiber_start(fiber3, 0, 0, 0, 1, &f3);
   return 0;
 }
 
