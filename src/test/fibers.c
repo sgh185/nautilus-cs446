@@ -66,7 +66,7 @@ void fiber4(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
   int a = 0;
-  while(a < 20){
+  while(a < 10){
     nk_vc_printf("Fiber 4 a = %d\n", a++);
     nk_fiber_yield();
   }
@@ -78,7 +78,7 @@ void fiber3(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
   int a = 0;
-  while(a < 5){
+  while(a < 2){
     nk_vc_printf("Fiber 3 a = %d\n", a++);
     nk_fiber_yield();
   }
@@ -91,7 +91,7 @@ void fiber1(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
   int a = 0;
-  while(a < 10){
+  while(a < 5){
     nk_vc_printf("Fiber 1 a = %d\n", a++);
     nk_fiber_yield();
   }
@@ -105,13 +105,49 @@ void fiber2(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
   int a = 0;
-  while(a < 20){
+  while(a < 10){
     nk_vc_printf("Fiber 2 a = %d\n", a++);
     nk_fiber_yield();
   }
   nk_vc_printf("Fiber 2 is finished, a = %d\n", a);
   nk_fiber_t *f4;
   nk_fiber_start(fiber4, 0, 0, 0, &f4);
+}
+
+void print_even(void *i, void **o){
+  nk_fiber_set_vc(vc);
+  for (int i = 0; i < 10; ++i){
+    if ((i % 2) == 0){
+      nk_vc_printf("Fiber even, counter = %d\n", i);
+      nk_fiber_yield();
+    }
+  }
+  nk_vc_printf("Fiber even is finished\n");
+
+  return;
+}
+
+void print_odd(void *i, void **o){
+  nk_fiber_set_vc(vc);
+  for (int i = 0; i < 10; ++i){
+    if ((i % 2) != 0){
+      nk_vc_printf("Fiber odd, counter = %d\n", i);
+      nk_fiber_yield();
+    }
+  }
+  nk_vc_printf("Fiber odd is finished\n");
+
+  return;
+}
+
+int test_fibers_counter(){
+  nk_fiber_t *even;
+  nk_fiber_t *odd;
+  vc = get_cur_thread()->vc;
+  nk_fiber_start(print_even, 0, 0, 0, &even);
+  nk_fiber_start(print_odd, 0, 0, 0, &odd);
+
+  return 0;
 }
 
 int test_nested_fibers()
@@ -139,8 +175,23 @@ int test_fibers()
 static int
 handle_fibers (char * buf, void * priv)
 {
-  //test_fibers();
+  test_fibers();
+
+  return 0;
+}
+
+static int
+handle_fibers2 (char * buf, void * priv)
+{
   test_nested_fibers();
+
+  return 0;
+}
+
+static int
+handle_fibers3 (char * buf, void * priv)
+{
+  test_fibers_counter();
 
   return 0;
 }
@@ -150,4 +201,19 @@ static struct shell_cmd_impl fibers_impl = {
   .help_str = "fibertest",
   .handler  = handle_fibers,
 };
+
+static struct shell_cmd_impl fibers_impl2 = {
+  .cmd      = "fibertest2",
+  .help_str = "fibertest2",
+  .handler  = handle_fibers2,
+};
+
+static struct shell_cmd_impl fibers_impl3 = {
+  .cmd      = "fibertest3",
+  .help_str = "fibertest3",
+  .handler  = handle_fibers3,
+};
+
 nk_register_shell_cmd(fibers_impl);
+nk_register_shell_cmd(fibers_impl2);
+nk_register_shell_cmd(fibers_impl3);
