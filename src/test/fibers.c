@@ -145,9 +145,27 @@ handle_fibers (char * buf, void * priv)
   return 0;
 }
 
+static int
+handle_fibers2 (char * buf, void * priv)
+{
+  test_fibers();
+  //test_nested_fibers();
+
+  return 0;
+}
+
+
 static struct shell_cmd_impl fibers_impl = {
   .cmd      = "fibertest",
   .help_str = "fibertest",
   .handler  = handle_fibers,
 };
+
+static struct shell_cmd_impl fibers_impl2 = {
+  .cmd      = "fibertest2",
+  .help_str = "fibertest2",
+  .handler  = handle_fibers2,
+};
 nk_register_shell_cmd(fibers_impl);
+nk_register_shell_cmd(fibers_impl2);
+
