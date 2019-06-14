@@ -66,7 +66,7 @@ void fiber4(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
   int a = 0;
-  while(a < 10){
+  while(a < 5){
     nk_vc_printf("Fiber 4 a = %d\n", a++);
     nk_fiber_yield();
   }
@@ -105,7 +105,7 @@ void fiber2(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
   int a = 0;
-  while(a < 10){
+  while(a < 5){
     nk_vc_printf("Fiber 2 a = %d\n", a++);
     nk_fiber_yield();
   }
