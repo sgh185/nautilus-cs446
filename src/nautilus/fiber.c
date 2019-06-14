@@ -99,7 +99,7 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
   if (fiber_output){
     *fiber_output = fiber;
   }
-  fiber->vc = get_cur_thread()->vc;
+  //fiber->vc = get_cur_thread()->vc;
   fiber->fid = fiber;
   return 0;
 }
@@ -153,11 +153,12 @@ int nk_fiber_yield(){
 
   // Context switch
   get_cur_thread()->curr_fiber = f_to;
-  nk_fiber_set_vc(get_cur_thread()->vc);
+  //nk_fiber_set_vc(get_cur_thread()->vc);
   nk_fiber_context_switch(f_from, f_to);
 
   // Change thread virtual console
   //_get_fiber_thread()->vc = f_to->vc ;
+  get_cur_thread()->vc = f_to->vc ;
   //FIBER_INFO("nk_fiber_yield(): changing vc %p\n", f_to->vc);
 
   return 0;
