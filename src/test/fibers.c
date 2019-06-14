@@ -10,13 +10,17 @@
  * http://www.v3vee.org  and
  * http://xstack.sandia.gov/hobbes
  *
- * Copyright (c) 2017, Peter Dinda <pdinda@northwestern.edu>
- * Copyright (c) 2017, The V3VEE Project  <http://www.v3vee.org> 
+ * Copyright (c) 2019, Michael A. Cuevas <cuevas@u.northwestern.edu>
+ * Copyright (c) 2019, Enrico Deiana <3nric000@gmail.com>
+ * Copyright (c) 2019, Peter Dinda <pdinda@northwestern.edu>
+ * Copyright (c) 2019, The V3VEE Project  <http://www.v3vee.org> 
  *                     The Hobbes Project <http://xstack.sandia.gov/hobbes>
  * All rights reserved.
  *
- * Author: Peter Dinda <pdinda@northwestern.edu>
- *
+ * Author:  Michael A. Cuevas <cuevas@u.northwestern.edu>
+ *          Enrico Deiana <3nric000@gmail.com>
+ *          Peter Dinda <pdinda@northwestern.edu>
+ *  
  * This is free software.  You are permitted to use,
  * redistribute, and modify it as specified in the file "LICENSE.txt".
  */

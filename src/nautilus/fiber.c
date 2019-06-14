@@ -10,13 +10,15 @@
  * http://www.v3vee.org  and
  * http://xstack.sandia.gov/hobbes
  *
- * Copyright (c) 2015, Kyle C. Hale <kh@u.northwestern.edu>
- * Copyright (c) 2017, Peter A. Dinda <pdinda@northwestern.edu>
- * Copyright (c) 2015, The V3VEE Project  <http://www.v3vee.org> 
+ * Copyright (c) 2019, Michael A. Cuevas <cuevas@u.northwestern.edu>
+ * Copyright (c) 2019, Enrico Deiana <3nric000@gmail.com>
+ * Copyright (c) 2019, Peter A. Dinda <pdinda@northwestern.edu>
+ * Copyright (c) 2019, The V3VEE Project  <http://www.v3vee.org> 
  *                     The Hobbes Project <http://xstack.sandia.gov/hobbes>
  * All rights reserved.
  *
- * Authors: Kyle C. Hale <kh@u.northwestern.edu>
+ * Authors: Michael A. Cuevas <cuevas@u.northwestern.edu>
+ *          Enrico Deiana <3nric000@gmail.com>
  *          Peter A. Dinda <pdinda@northwestern.edu>
  *
  * This is free software.  You are permitted to use,
@@ -97,7 +99,7 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
   if (fiber_output){
     *fiber_output = fiber;
   }
-  
+  fiber->vc = get_cur_thread()->vc;
   fiber->fid = fiber;
   return 0;
 }
@@ -151,6 +153,7 @@ int nk_fiber_yield(){
 
   // Context switch
   get_cur_thread()->curr_fiber = f_to;
+  nk_fiber_set_vc(get_cur_thread()->vc);
   nk_fiber_context_switch(f_from, f_to);
 
   // Change thread virtual console
