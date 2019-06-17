@@ -224,7 +224,11 @@ int nk_timer_cancel(nk_timer_t *t)
 	list_del_init(&t->active_node);
 	was_active=1;
     }
-    t->state = was_active ? NK_TIMER_SIGNALLED : NK_TIMER_INACTIVE;
+    if(t->state == was_active){
+        t->state = NK_TIMER_SIGNALLED;
+    }
+    // THIS WAS PREVENTING THE TIMERS FROM BEING CANCELLED
+    //t->state = was_active ? NK_TIMER_SIGNALLED : NK_TIMER_INACTIVE;
     ACTIVE_UNLOCK();
     // now do handling that does not require the lock
     if (was_active) { 
@@ -271,10 +275,11 @@ int nk_timer_wait(nk_timer_t *t)
 	if (t->flags != NK_TIMER_SPIN) { 
 	    DEBUG("going to sleep on wait queue timer %p %s waitqueue %p %s \n", t, t->name, t->waitq, t->waitq->name);
 	    nk_wait_queue_sleep_extended(t->waitq, check, t);
+        DEBUG("nk_timer_wait() right after sleep_extended\n");
 	} else {
 	    asm volatile ("pause");
 	}
-	//DEBUG("try again\n");
+	DEBUG("try again\n");
     }
     return 0;
 }

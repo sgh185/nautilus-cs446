@@ -99,7 +99,7 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
   if (fiber_output){
     *fiber_output = fiber;
   }
-  //fiber->vc = get_cur_thread()->vc;
+  fiber->vc = get_cur_thread()->vc;
   fiber->fid = fiber;
   return 0;
 }
@@ -153,12 +153,14 @@ int nk_fiber_yield(){
 
   // Context switch
   get_cur_thread()->curr_fiber = f_to;
-  //nk_fiber_set_vc(get_cur_thread()->vc);
+  if(!f_from->is_idle){ 
+    nk_fiber_set_vc(f_from->vc);
+  }
   nk_fiber_context_switch(f_from, f_to);
 
   // Change thread virtual console
   //_get_fiber_thread()->vc = f_to->vc ;
-  get_cur_thread()->vc = f_to->vc ;
+  //get_cur_thread()->vc = f_to->vc ;
   //FIBER_INFO("nk_fiber_yield(): changing vc %p\n", f_to->vc);
 
   return 0;
@@ -306,7 +308,8 @@ static inline uint64_t _get_random()
 static int _nk_initial_placement()
 {
     struct sys_info * sys = per_cpu_get(system);
-    return (int)(_get_random() % sys->num_cpus);
+    return 1;
+    //return (int)(_get_random() % sys->num_cpus);
 }
 
 nk_thread_t *_get_random_fiber_thread(){

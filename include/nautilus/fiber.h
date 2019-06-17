@@ -72,6 +72,7 @@ typedef struct nk_fiber {
   unsigned long fid; /* Fiber ID, may not be needed? */
 
   struct nk_virtual_console *vc; // for printing
+  int is_idle;
 
   /* Only necessary if we decide to implement join/wait */
   //nk_wait_queue_t *waitq; // wait queue for threads waiting on this thread
