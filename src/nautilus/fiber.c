@@ -93,6 +93,7 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
   fiber->input = input;
   fiber->output = output;
 
+  // Initialize the fiber's stack
   _nk_fiber_init(fiber);
 
   // Return the fiber
@@ -104,21 +105,27 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
   return 0;
 }
 
-int nk_fiber_run(nk_fiber_t *f, uint8_t random_cpu_flag)
-{
+int nk_fiber_run(nk_fiber_t *f, uint8_t random_cpu_flag){
+  //by default, the curr_thread is is set to the fiber thread
   nk_thread_t *curr_thread = _get_fiber_thread();
+  
+  //if the random cpu flag is set, the fiber will be placed on a random fiber thread's queue
   if (random_cpu_flag){
     curr_thread = _get_random_fiber_thread();
   }
-
+  
+  //enqueues the fiber into the chosen fiber thread's queue
   fiber_queue *fiber_sched_queue = &(curr_thread->fiber_sched_queue);
   FIBER_INFO("nk_fiber_run() : about to enqueue a fiber: %p cpu: %d\n", f, curr_thread->current_cpu); 
   fiber_queue_enqueue(fiber_sched_queue, f);
+
+  //if the fiber thread is sleeping, wake it up so it can start the fibers
   if(curr_thread->timer){
     FIBER_INFO("nk_fiber_run() : waking fiber thread\n");
     FIBER_INFO("nk_fiber_run() : curr_thread = %p %s timer = %p %s cpu = %d \n", curr_thread, curr_thread->name, curr_thread->timer, curr_thread->timer->name, curr_thread->current_cpu);
     nk_timer_cancel(curr_thread->timer);
   }
+
   return 0;
 }
 
@@ -133,15 +140,15 @@ int nk_fiber_yield(){
   // Get the current fiber
   nk_fiber_t *f_from = _nk_fiber_current();
   FIBER_INFO("Current queue size is %d\n", _get_fiber_thread()->fiber_sched_queue.size);
+ 
   // Get the fiber we are switching to
   nk_fiber_t *f_to = _rr_policy();
-  //checks if there are no fibers in the queue. If this is the case, the idle fiber is the only fiber in the queue
+  
+  //if f_to is 0, there are no fibers in the queue, and therefore there are no fibers to switch to
+  // we can then exit early and sleep
   if(f_to == 0){
     return 0;
   }
-  // Note: optimization
-  // special case: if f_to is 0, then it's the idle fiber
-  // keep running the current fiber, and enqueue back the idle fiber
 
   // Enqueue the current fiber
   if(f_from->fid != f_to->fid) {
@@ -222,8 +229,32 @@ void _fiber_wrapper(nk_fiber_t* f_to){
   return;
 }
 
+/* Utility function that sets up the given fiber's stack
+ * The stack will look like:
+ *
+ * ________________________
+ *| Ptr to Fiber's Routine |
+ *|________________________|
+ *|   Dummy  GPR VALUES    |
+ *|           .            |
+ *|           .            |
+ *|           .            |
+ *| ptr to f in rdi's spot |
+ *|                        |
+ *|  Remaining dummy GPRs  |
+ *|________________________|
+ *
+ * Order of GPRs can be found in include/nautilus/fiber.c
+ * All values except %rdi are dummy values
+ * %rdi's stack position will contain ptr to fiber (stack).
+ * When we pop these values off the stack, ptr to fiber
+ * will go into %rdi which is first argument register.
+ * We can then use this in context switch assembly to help
+ * us switch stacks.
+ *
+ */
+
 void _nk_fiber_init(nk_fiber_t *f){
-  // Setup stack
   f->rsp = (uint64_t) f->stack + f->stack_size;
   _fiber_push(f, (uint64_t) _fiber_wrapper);
   _fiber_push(f, 0xdeadbeef12345670ul);
@@ -246,42 +277,40 @@ void _nk_fiber_init(nk_fiber_t *f){
 }
 
 nk_fiber_t* _nk_fiber_current(){
+  // returns the current CPU's current fiber
   nk_thread_t *curr_thread = get_cur_thread();
-
   return curr_thread->curr_fiber;
 }
 
 nk_fiber_t* _nk_idle_fiber(){
+  // returns the idle fiber of the current CPU
   nk_thread_t *curr_thread = _get_fiber_thread();
-
   return curr_thread->idle_fiber;
 }
 
 nk_fiber_t* _rr_policy(){
+  // Get the queue from the fiber thread on the current CPU
   nk_thread_t *cur_thread = _get_fiber_thread();
   fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue); 
+
+  // Pick the fiber at the front of the queue and return it (will return 0 if no fibers in queue)
   nk_fiber_t *fiber_to_schedule = fiber_queue_dequeue(fiber_sched_queue);
   FIBER_INFO("_rr_policy() : just dequeued a fiber : %p\n", fiber_to_schedule); 
-  
-  if(fiber_to_schedule == 0){
-    return fiber_to_schedule;
-  }
-  // If it is the idle fiber reinsert it into the fiber_queue (or do not dequeue it)
-  uint8_t idle_fiber_check = _is_idle_fiber(fiber_to_schedule);
-  if (idle_fiber_check){
-    nk_fiber_t *idle_fiber = _nk_idle_fiber();
-    //FIBER_INFO("_rr_policy() : about to enqueue a fiber: %p\n", idle_fiber); 
-    //fiber_queue_enqueue(fiber_sched_queue, idle_fiber);
-  }
-
   return fiber_to_schedule;
 }
 
 void _nk_fiber_exit(nk_fiber_t *f){
+  // Get the idle fiber for the current CPU
   nk_fiber_t *idle = _nk_idle_fiber();
+  
+  // Mark the current fiber as done (since we are exiting)
   f->is_done = 1;
+
+  // Free the current fiber's memory (stack and stack ptr)
   free(f->stack);
   free(f);
+  
+  // Switch back to the idle fiber using special exit function
   _exit_switch(idle);
 
   return;
@@ -290,6 +319,7 @@ void _nk_fiber_exit(nk_fiber_t *f){
 uint8_t _is_idle_fiber(nk_fiber_t *f){
   nk_fiber_t *idle_fiber = _nk_idle_fiber();
 
+  // if the argument fiber is the idle fiber, return 1
   uint8_t result = 0;
   if (idle_fiber == f){
     result = 1;
@@ -307,16 +337,19 @@ static inline uint64_t _get_random()
 
 static int _nk_initial_placement()
 {
+    // Picks a random number between 0 and the number of CPUs
     struct sys_info * sys = per_cpu_get(system);
     return (int)(_get_random() % sys->num_cpus);
 }
 
 nk_thread_t *_get_random_fiber_thread(){
+  // Picks a random CPU and returns that CPU's fiber thread
   int random_cpu = _nk_initial_placement();
   struct sys_info * sys = per_cpu_get(system);
   return sys->cpus[random_cpu]->fiber_thread;
 }
 
 nk_thread_t *_get_fiber_thread(){
+  // returns the current CPU's fiber thread
   return get_cpu()->fiber_thread;
 }

@@ -224,7 +224,7 @@ int nk_timer_cancel(nk_timer_t *t)
 	list_del_init(&t->active_node);
 	was_active=1;
     }
-    if(t->state == was_active){
+    if(was_active){
         t->state = NK_TIMER_SIGNALLED;
     }
     // THIS WAS PREVENTING THE TIMERS FROM BEING CANCELLED
