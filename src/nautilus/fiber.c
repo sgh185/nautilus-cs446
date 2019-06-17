@@ -308,8 +308,7 @@ static inline uint64_t _get_random()
 static int _nk_initial_placement()
 {
     struct sys_info * sys = per_cpu_get(system);
-    return 1;
-    //return (int)(_get_random() % sys->num_cpus);
+    return (int)(_get_random() % sys->num_cpus);
 }
 
 nk_thread_t *_get_random_fiber_thread(){
