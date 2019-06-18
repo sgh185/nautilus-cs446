@@ -101,7 +101,7 @@ int nk_fiber_start(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size
 int nk_fiber_yield();
 
 // Yield that allows choice of fiber to yield to
-int nk_fiber_yield_to(nk_fiber_t *fib);
+int nk_fiber_yield_to(nk_fiber_t *f_to);
 
 // Takes a fiber, a condition to yield on, and a function to check that condition
 // returns 0 if the fiber does not yield
@@ -132,6 +132,8 @@ nk_fiber_t* _nk_fiber_current();
 nk_fiber_t* _nk_idle_fiber();
 
 nk_fiber_t* _rr_policy();
+
+int _nk_fiber_yield_to();
 
 void _nk_fiber_exit(nk_fiber_t *f);
 

@@ -137,11 +137,7 @@ int nk_fiber_start(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size
 }
 
 int nk_fiber_yield(){
-  // Get the current fiber
-  nk_fiber_t *f_from = _nk_fiber_current();
-  FIBER_INFO("Current queue size is %d\n", _get_fiber_thread()->fiber_sched_queue.size);
- 
-  // Get the fiber we are switching to
+    // Get the fiber we are switching to
   nk_fiber_t *f_to = _rr_policy();
   
   //if f_to is 0, there are no fibers in the queue, and therefore there are no fibers to switch to
@@ -150,31 +146,12 @@ int nk_fiber_yield(){
     return 0;
   }
 
-  // Enqueue the current fiber
-  if(f_from->fid != f_to->fid) {
-    nk_thread_t *cur_thread = _get_fiber_thread();
-    fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue);
-    FIBER_INFO("nk_fiber_yield() : About to enqueue fiber: %p \n", f_from);
-    fiber_queue_enqueue(fiber_sched_queue, f_from);
-  }
-
-  // Context switch
-  get_cur_thread()->curr_fiber = f_to;
-  if(!f_from->is_idle){ 
-    nk_fiber_set_vc(f_from->vc);
-  }
-  nk_fiber_context_switch(f_from, f_to);
-
-  // Change thread virtual console
-  //_get_fiber_thread()->vc = f_to->vc ;
-  //get_cur_thread()->vc = f_to->vc ;
-  //FIBER_INFO("nk_fiber_yield(): changing vc %p\n", f_to->vc);
-
-  return 0;
+  return _nk_fiber_yield_to(f_to);
 }
 
-int nk_fiber_yield_to(nk_fiber_t *fib){
-
+int nk_fiber_yield_to(nk_fiber_t *f_to){
+  // remove f_to from its respective fiber queue
+  
   return 0;
 }
 
@@ -298,6 +275,32 @@ nk_fiber_t* _rr_policy(){
   FIBER_INFO("_rr_policy() : just dequeued a fiber : %p\n", fiber_to_schedule); 
   return fiber_to_schedule;
 }
+
+int _nk_fiber_yield_to(nk_fiber_t *f_to){
+  // Get the current fiber
+  nk_fiber_t *f_from = _nk_fiber_current();
+  FIBER_INFO("Current queue size is %d\n", _get_fiber_thread()->fiber_sched_queue.size);
+ 
+ // Enqueue the current fiber
+  if(f_from->fid != f_to->fid) {
+    nk_thread_t *cur_thread = _get_fiber_thread();
+    fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue);
+    FIBER_INFO("nk_fiber_yield() : About to enqueue fiber: %p \n", f_from);
+    fiber_queue_enqueue(fiber_sched_queue, f_from);
+  }
+
+  // Context switch
+  get_cur_thread()->curr_fiber = f_to;
+  if(!f_from->is_idle){ 
+    nk_fiber_set_vc(f_from->vc);
+  }
+
+  nk_fiber_context_switch(f_from, f_to);
+
+  return 0;
+}
+
+
 
 void _nk_fiber_exit(nk_fiber_t *f){
   // Get the idle fiber for the current CPU
