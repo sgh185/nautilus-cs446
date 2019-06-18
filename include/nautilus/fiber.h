@@ -77,6 +77,7 @@ typedef struct nk_fiber {
   /* Only necessary if we decide to implement join/wait */
   //nk_wait_queue_t *waitq; // wait queue for threads waiting on this thread
   //int num_wait;           // how many wait queues this thread is currently on
+  struct list_head l_head;
 
   nk_fiber_fun_t fun;
   void *input;

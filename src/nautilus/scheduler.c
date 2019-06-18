@@ -3968,8 +3968,8 @@ static void nk_fiber_idle(void *in, void **out)
       //INFO("nk_fiber_idle()\n");
       nk_fiber_yield();
       //INFO("nk_fiber_idle() : going to sleep\n");
-      if(_get_fiber_thread()->fiber_sched_queue.size == 0){
-        nk_sleep(10000000000);
+      if(list_empty_careful(&(_get_fiber_thread()->f_sched_queue))){
+        nk_sleep(10000000);
         INFO("nk_fiber-idle() : waking up\n");
       }
   }
@@ -4000,7 +4000,7 @@ static void fiber(void *in, void **out)
 
   // Promote to fiber thread
   get_cur_thread()->sched_state->is_fiber = 1;
-  
+  INIT_LIST_HEAD(&(get_cur_thread()->f_sched_queue));
   // Start idle fiber
   get_cpu()->fiber_thread = get_cur_thread();
   nk_fiber_t *idle_fiber_ptr;

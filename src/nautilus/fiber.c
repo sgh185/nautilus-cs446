@@ -35,7 +35,6 @@
 #include <nautilus/timer.h>
 #include <nautilus/percpu.h>
 #include <nautilus/atomic.h>
-#include <nautilus/queue.h>
 #include <nautilus/list.h>
 #include <nautilus/errno.h>
 #include <nautilus/mm.h>
@@ -102,6 +101,10 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
   }
   fiber->vc = get_cur_thread()->vc;
   fiber->fid = fiber;
+
+  // Initializes the fiber's list field
+  INIT_LIST_HEAD(&(fiber->l_head)); 
+
   return 0;
 }
 
@@ -115,9 +118,11 @@ int nk_fiber_run(nk_fiber_t *f, uint8_t random_cpu_flag){
   }
   
   //enqueues the fiber into the chosen fiber thread's queue
-  fiber_queue *fiber_sched_queue = &(curr_thread->fiber_sched_queue);
+ // fiber_queue *fiber_sched_queue = &(curr_thread->fiber_sched_queue);
+  struct list_head *fiber_sched_queue = &(curr_thread->f_sched_queue);
   FIBER_INFO("nk_fiber_run() : about to enqueue a fiber: %p cpu: %d\n", f, curr_thread->current_cpu); 
-  fiber_queue_enqueue(fiber_sched_queue, f);
+  //fiber_queue_enqueue(fiber_sched_queue, f);
+  list_add_tail(&(f->l_head), fiber_sched_queue);
 
   //if the fiber thread is sleeping, wake it up so it can start the fibers
   if(curr_thread->timer){
@@ -142,7 +147,7 @@ int nk_fiber_yield(){
   
   //if f_to is 0, there are no fibers in the queue, and therefore there are no fibers to switch to
   // we can then exit early and sleep
-  if(f_to == 0){
+  if(f_to != get_cur_thread()->curr_fiber){
     return 0;
   }
 
@@ -191,7 +196,7 @@ void _fiber_push(nk_fiber_t * f, uint64_t x){
 
 void _fiber_wrapper(nk_fiber_t* f_to){
   // Set current fiber
-  //get_cur_thread()->curr_fiber = f_to;
+  //get_cur_thread()->curr_fiber = 
 
   // Execute fiber function
   FIBER_DEBUG("_fiber_wrapper BEGIN\n");
@@ -206,7 +211,8 @@ void _fiber_wrapper(nk_fiber_t* f_to){
   return;
 }
 
-/* Utility function that sets up the given fiber's stack
+/* Utility function that sets up
+the given fiber's stack
  * The stack will look like:
  *
  * ________________________
@@ -268,25 +274,35 @@ nk_fiber_t* _nk_idle_fiber(){
 nk_fiber_t* _rr_policy(){
   // Get the queue from the fiber thread on the current CPU
   nk_thread_t *cur_thread = _get_fiber_thread();
-  fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue); 
-
-  // Pick the fiber at the front of the queue and return it (will return 0 if no fibers in queue)
-  nk_fiber_t *fiber_to_schedule = fiber_queue_dequeue(fiber_sched_queue);
-  FIBER_INFO("_rr_policy() : just dequeued a fiber : %p\n", fiber_to_schedule); 
+  //fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue); 
+  struct list_head *fiber_sched_queue = &(cur_thread->f_sched_queue);
+  nk_fiber_t *fiber_to_schedule = NULL;
+  // Pick the fiber at the front of the queue and return it (will return 1 if no fibers in queue)
+  if(!(list_empty_careful(fiber_sched_queue))){
+    fiber_to_schedule = list_first_entry(fiber_sched_queue->next, nk_fiber_t, l_head);
+    list_del_init(&(fiber_to_schedule->l_head));
+  }
+ /* nk_fiber_t *fiber_to_schedule = fiber_queue_dequeue(fiber_sched_queue);
+*/
+  nk_thread_t *current_t = get_cur_thread();
+  FIBER_INFO("_rr_policy() : just dequeued a fiber : %p\n", fiber_to_schedule);
+  FIBER_INFO("_rr_policy() : current fiber is %p and idle fiber is %p\n", current_t->curr_fiber, cur_thread->idle_fiber); 
   return fiber_to_schedule;
 }
 
 int _nk_fiber_yield_to(nk_fiber_t *f_to){
   // Get the current fiber
   nk_fiber_t *f_from = _nk_fiber_current();
-  FIBER_INFO("Current queue size is %d\n", _get_fiber_thread()->fiber_sched_queue.size);
+  //FIBER_INFO("Current queue size is %d\n", _get_fiber_thread()->fiber_sched_queue.size);
  
  // Enqueue the current fiber
-  if(f_from->fid != f_to->fid) {
+  if(f_from != f_to) {
     nk_thread_t *cur_thread = _get_fiber_thread();
-    fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue);
+    //fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue);
+    struct list_head *fiber_sched_queue = &(cur_thread->f_sched_queue);
     FIBER_INFO("nk_fiber_yield() : About to enqueue fiber: %p \n", f_from);
-    fiber_queue_enqueue(fiber_sched_queue, f_from);
+    //fiber_queue_enqueue(fiber_sched_queue, f_from);
+    list_add_tail(&(f_from->l_head), fiber_sched_queue);
   }
 
   // Context switch

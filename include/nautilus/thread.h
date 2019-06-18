@@ -40,7 +40,7 @@ extern "C" {
 typedef uint64_t nk_stack_size_t;
     
 #include <nautilus/scheduler.h>
-
+#include <nautilus/queue.h>
 #include <nautilus/fiber.h>
 
 #define CPU_ANY       -1
@@ -173,6 +173,7 @@ typedef enum {
 
 
 typedef struct nk_wait_queue nk_wait_queue_t;
+typedef struct nk_queue nk_queue_t;
 
 struct nk_thread {
     uint64_t rsp;                /* +0  SHOULD NOT CHANGE POSITION */
@@ -185,6 +186,7 @@ struct nk_thread {
     nk_fiber_t *idle_fiber;
     nk_fiber_t *curr_fiber;
     fiber_queue fiber_sched_queue;
+    struct list_head f_sched_queue;
 
     nk_stack_size_t stack_size;
     unsigned long tid;
