@@ -142,13 +142,19 @@ int nk_fiber_start(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size
 }
 
 int nk_fiber_yield(){
-    // Get the fiber we are switching to
+  // Get the fiber we are switching to
   nk_fiber_t *f_to = _rr_policy();
-  
+  FIBER_INFO("The fiber picked to schedule is %p\n", f_to); 
+  nk_fiber_t *f_iter = NULL;
+    struct list_head *f_sched = &(_get_fiber_thread()->f_sched_queue);
+    list_for_each_entry(f_iter, f_sched, l_head){
+    FIBER_INFO("The fiber queue contains fiber: %p\n", f_iter);
+    }
+    FIBER_INFO("Done printing out the fiber queue.\n");
   //if f_to is 0, there are no fibers in the queue, and therefore there are no fibers to switch to
   // we can then exit early and sleep
-  if(f_to != get_cur_thread()->curr_fiber){
-    return 0;
+  if(f_to == NULL){
+   return 0;
   }
 
   return _nk_fiber_yield_to(f_to);
@@ -206,6 +212,7 @@ void _fiber_wrapper(nk_fiber_t* f_to){
   // Exit when fiber function ends
   //MAC: This is kind of a messy fix, maybe we can find a better way to avoid adding the fiber back into the queue
   get_cur_thread()->curr_fiber = _nk_idle_fiber();
+  list_del_init(&(get_cur_thread()->curr_fiber->l_head));
   _nk_fiber_exit(f_to);
 
   return;
@@ -278,10 +285,12 @@ nk_fiber_t* _rr_policy(){
   struct list_head *fiber_sched_queue = &(cur_thread->f_sched_queue);
   nk_fiber_t *fiber_to_schedule = NULL;
   // Pick the fiber at the front of the queue and return it (will return 1 if no fibers in queue)
-  if(!(list_empty_careful(fiber_sched_queue))){
-    fiber_to_schedule = list_first_entry(fiber_sched_queue->next, nk_fiber_t, l_head);
+  if(!(list_empty(fiber_sched_queue))){
+    fiber_to_schedule = list_first_entry(fiber_sched_queue, nk_fiber_t, l_head);
     list_del_init(&(fiber_to_schedule->l_head));
-  }
+  } else{
+    list_del_init(fiber_sched_queue);
+    }
  /* nk_fiber_t *fiber_to_schedule = fiber_queue_dequeue(fiber_sched_queue);
 */
   nk_thread_t *current_t = get_cur_thread();
@@ -296,7 +305,7 @@ int _nk_fiber_yield_to(nk_fiber_t *f_to){
   //FIBER_INFO("Current queue size is %d\n", _get_fiber_thread()->fiber_sched_queue.size);
  
  // Enqueue the current fiber
-  if(f_from != f_to) {
+  if(f_to->fid != f_from->fid) {
     nk_thread_t *cur_thread = _get_fiber_thread();
     //fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue);
     struct list_head *fiber_sched_queue = &(cur_thread->f_sched_queue);
