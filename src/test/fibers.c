@@ -144,6 +144,56 @@ void print_odd(void *i, void **o){
   return;
 }
 
+void fiber_first(void *i, void **o)
+{
+  nk_fiber_set_vc(vc);
+  int a = 0;
+  nk_fiber_t **temp = (nk_fiber_t**)i;
+  while(a < 5){
+    nk_vc_printf("Fiber_first() : a = %d and yielding to fiber_second = %p\n", a++, temp[1]);
+    nk_fiber_yield_to(temp[1]);
+  }
+  nk_vc_printf("Fiber 1 is finished, a = %d\n", a);
+}
+
+
+void fiber_second(void *i, void **o)
+{
+  nk_fiber_set_vc(vc);
+  int a = 0;
+  nk_fiber_t **temp = (nk_fiber_t**)i;
+  while(a < 5){
+    nk_vc_printf("Fiber_second() : a = %d and yielding to fiber_third = %p\n", a++, temp[2]);
+    nk_fiber_yield_to(temp[2]);
+  }
+  nk_vc_printf("Fiber 2 is finished, a = %d\n", a);
+}
+
+void fiber_third(void *i, void **o)
+{
+  nk_fiber_set_vc(vc);
+  int a = 0;
+  nk_fiber_t **temp = (nk_fiber_t**)i;
+  while(a < 5){
+    nk_vc_printf("fiber_third() : a = %d and yielding to fiber_fourth = %p\n", a++, temp[3]);
+    nk_fiber_yield_to(temp[3]);
+  }
+  nk_vc_printf("fiber 3 is finished, a = %d\n", a);
+}
+
+void fiber_fourth(void *i, void **o)
+{
+  nk_fiber_set_vc(vc);
+  int a = 0;
+  nk_fiber_t **temp = (nk_fiber_t**)i;
+  while(a < 5){
+    nk_vc_printf("fiber_fourth() : a = %d and yielding to fiber_first = %p\n", a++, temp[0]);
+    nk_fiber_yield_to(temp[0]);
+  }
+  nk_vc_printf("fiber 4 is finished, a = %d\n", a);
+}
+
+
 int test_fibers_counter(){
   nk_fiber_t *even;
   nk_fiber_t *odd;
@@ -176,6 +226,30 @@ int test_fibers()
   return 0;
 }
 
+int test_yield_to()
+{
+  nk_fiber_t *f_first;
+  nk_fiber_t *f_second;
+  nk_fiber_t *f_third;
+  nk_fiber_t *f_fourth;
+  vc = get_cur_thread()->vc;
+  nk_vc_printf("test_nested_fibers() : virtual console %p\n", vc);
+  nk_fiber_create(fiber_fourth, 0, 0, 0, &f_fourth);
+  nk_fiber_create(fiber_first, 0, 0, 0, &f_first);
+  nk_fiber_create(fiber_third, 0, 0, 0, &f_third);
+  nk_fiber_create(fiber_second, 0, 0, 0, &f_second);
+  void *input[4] = {&(f_first), f_second, f_third, f_fourth};
+  f_first->input = input;
+  f_second->input = input;
+  f_third->input = input;
+  f_fourth->input = input;
+  nk_fiber_run(f_fourth, 0);
+  nk_fiber_run(f_first, 0);
+  nk_fiber_run(f_third, 0);
+  nk_fiber_run(f_second, 0);
+  return 0;
+}
+
 static int
 handle_fibers (char * buf, void * priv)
 {
@@ -200,6 +274,15 @@ handle_fibers3 (char * buf, void * priv)
   return 0;
 }
 
+static int
+handle_fibers4 (char * buf, void * priv)
+{
+  test_yield_to();
+
+  return 0;
+}
+
+
 static struct shell_cmd_impl fibers_impl = {
   .cmd      = "fibertest",
   .help_str = "fibertest",
@@ -218,6 +301,13 @@ static struct shell_cmd_impl fibers_impl3 = {
   .handler  = handle_fibers3,
 };
 
+static struct shell_cmd_impl fibers_impl4 = {
+  .cmd      = "fibertest4",
+  .help_str = "fibertest4",
+  .handler  = handle_fibers4,
+};
+
 nk_register_shell_cmd(fibers_impl);
 nk_register_shell_cmd(fibers_impl2);
 nk_register_shell_cmd(fibers_impl3);
+nk_register_shell_cmd(fibers_impl4);

@@ -162,7 +162,12 @@ int nk_fiber_yield(){
 
 int nk_fiber_yield_to(nk_fiber_t *f_to){
   // remove f_to from its respective fiber queue
-  
+  if(_check_all_queues_remove(f_to)){ 
+    FIBER_INFO("yield_to() : Failed to find fiber in queues :(\n");
+    _nk_fiber_yield_to(_rr_policy());
+    return 1;
+  }
+  _nk_fiber_yield_to(f_to);
   return 0;
 }
 
@@ -325,8 +330,6 @@ int _nk_fiber_yield_to(nk_fiber_t *f_to){
   return 0;
 }
 
-
-
 void _nk_fiber_exit(nk_fiber_t *f){
   // Get the idle fiber for the current CPU
   nk_fiber_t *idle = _nk_idle_fiber();
@@ -381,3 +384,23 @@ nk_thread_t *_get_fiber_thread(){
   // returns the current CPU's fiber thread
   return get_cpu()->fiber_thread;
 }
+
+// Checks all queues for the specified fiber and removes it from the queue if found
+int _check_all_queues_remove(nk_fiber_t *to_del){
+  struct sys_info *sys = per_cpu_get(system);
+  int cpu_iter = sys->num_cpus;
+  struct list_head *temp;
+  nk_fiber_t *test;
+  for(int iter = 0; iter < cpu_iter; iter++){
+    temp = &(sys->cpus[iter]->fiber_thread->f_sched_queue);
+    list_for_each_entry(test, temp, l_head){
+      if(test->fid == to_del->fid){
+        list_del_init(&(to_del->l_head));
+        return  0;
+      }
+    }
+  }
+  return 1;
+}
+
+

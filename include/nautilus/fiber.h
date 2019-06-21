@@ -144,6 +144,8 @@ nk_thread_t *_get_random_fiber_thread();
 
 nk_thread_t* _get_fiber_thread();
 
+int _check_all_queues_remove(nk_fiber_t *to_del);
+
 /******** FIBER QUEUE **********/
 typedef struct fiber_queue {
     uint64_t   size;        // number of elements currently in the queue
