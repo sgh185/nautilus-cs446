@@ -151,7 +151,6 @@ void fiber_first(void *i, void **o)
   nk_fiber_t *f_to = (nk_fiber_t*)i;
   while(a < 5){
     nk_vc_printf("Fiber_first() : a = %d and yielding to fiber_second = %p\n", a++, f_to);
-    nk_vc_printf("Fiber_first() : f_to = %p\n", &(f_to));
     nk_fiber_yield_to(f_to);
   }
   nk_vc_printf("Fiber 1 is finished, a = %d\n", a);
