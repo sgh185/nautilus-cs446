@@ -394,6 +394,7 @@ int _check_all_queues_remove(nk_fiber_t *to_del){
   for(int iter = 0; iter < cpu_iter; iter++){
     temp = &(sys->cpus[iter]->fiber_thread->f_sched_queue);
     list_for_each_entry(test, temp, l_head){
+      FIBER_INFO("_check_all_queues_remove() : %d outer loop and %p is the temp fiber\n", iter, test);
       if(test->fid == to_del->fid){
         list_del_init(&(to_del->l_head));
         return  0;

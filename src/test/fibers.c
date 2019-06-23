@@ -148,10 +148,11 @@ void fiber_first(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
   int a = 0;
-  nk_fiber_t **temp = (nk_fiber_t**)i;
+  nk_fiber_t *f_to = (nk_fiber_t*)i;
   while(a < 5){
-    nk_vc_printf("Fiber_first() : a = %d and yielding to fiber_second = %p\n", a++, temp[1]);
-    nk_fiber_yield_to(temp[1]);
+    nk_vc_printf("Fiber_first() : a = %d and yielding to fiber_second = %p\n", a++, f_to);
+    nk_vc_printf("Fiber_first() : f_to = %p\n", &(f_to));
+    nk_fiber_yield_to(f_to);
   }
   nk_vc_printf("Fiber 1 is finished, a = %d\n", a);
 }
@@ -161,10 +162,10 @@ void fiber_second(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
   int a = 0;
-  nk_fiber_t **temp = (nk_fiber_t**)i;
+  nk_fiber_t *f_to = (nk_fiber_t*)i;
   while(a < 5){
-    nk_vc_printf("Fiber_second() : a = %d and yielding to fiber_third = %p\n", a++, temp[2]);
-    nk_fiber_yield_to(temp[2]);
+    nk_vc_printf("Fiber_second() : a = %d and yielding to fiber_third = %p\n", a++, f_to);
+    nk_fiber_yield_to(f_to);
   }
   nk_vc_printf("Fiber 2 is finished, a = %d\n", a);
 }
@@ -173,10 +174,11 @@ void fiber_third(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
   int a = 0;
-  nk_fiber_t **temp = (nk_fiber_t**)i;
+  //nk_fiber_t **temp = (nk_fiber_t**)i;
+  nk_fiber_t *f_to = (nk_fiber_t*)i;
   while(a < 5){
-    nk_vc_printf("fiber_third() : a = %d and yielding to fiber_fourth = %p\n", a++, temp[3]);
-    nk_fiber_yield_to(temp[3]);
+    nk_vc_printf("fiber_third() : a = %d and yielding to fiber_fourth = %p\n", a++, f_to);
+    nk_fiber_yield_to(f_to);
   }
   nk_vc_printf("fiber 3 is finished, a = %d\n", a);
 }
@@ -185,10 +187,11 @@ void fiber_fourth(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
   int a = 0;
-  nk_fiber_t **temp = (nk_fiber_t**)i;
+  //nk_fiber_t **temp = (nk_fiber_t**)i;
+  nk_fiber_t *f_to = (nk_fiber_t*)i;
   while(a < 5){
-    nk_vc_printf("fiber_fourth() : a = %d and yielding to fiber_first = %p\n", a++, temp[0]);
-    nk_fiber_yield_to(temp[0]);
+    nk_vc_printf("fiber_fourth() : a = %d and yielding to fiber_first = %p\n", a++, f_to);
+    nk_fiber_yield_to(f_to);
   }
   nk_vc_printf("fiber 4 is finished, a = %d\n", a);
 }
@@ -233,16 +236,16 @@ int test_yield_to()
   nk_fiber_t *f_third;
   nk_fiber_t *f_fourth;
   vc = get_cur_thread()->vc;
-  nk_vc_printf("test_nested_fibers() : virtual console %p\n", vc);
+  nk_vc_printf("test_yield_to() : virtual console %p\n", vc);
   nk_fiber_create(fiber_fourth, 0, 0, 0, &f_fourth);
   nk_fiber_create(fiber_first, 0, 0, 0, &f_first);
   nk_fiber_create(fiber_third, 0, 0, 0, &f_third);
   nk_fiber_create(fiber_second, 0, 0, 0, &f_second);
-  void *input[4] = {&(f_first), f_second, f_third, f_fourth};
-  f_first->input = input;
-  f_second->input = input;
-  f_third->input = input;
-  f_fourth->input = input;
+  //void *input[4] = {&f_first, &f_second, &f_third, &f_fourth};
+  f_first->input = f_second;
+  f_second->input = f_third;
+  f_third->input = f_fourth;
+  f_fourth->input = f_first;
   nk_fiber_run(f_fourth, 0);
   nk_fiber_run(f_first, 0);
   nk_fiber_run(f_third, 0);
