@@ -246,10 +246,10 @@ int test_yield_to()
   f_second->input = f_third;
   f_third->input = f_fourth;
   f_fourth->input = f_first;
-  nk_fiber_run(f_fourth, 0);
-  nk_fiber_run(f_first, 0);
-  nk_fiber_run(f_third, 0);
-  nk_fiber_run(f_second, 0);
+  nk_fiber_run(f_fourth, 1);
+  nk_fiber_run(f_first, 1);
+  nk_fiber_run(f_third, 1);
+  nk_fiber_run(f_second, 1);
   return 0;
 }
 

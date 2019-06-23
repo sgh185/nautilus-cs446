@@ -120,14 +120,16 @@ int nk_fiber_run(nk_fiber_t *f, uint8_t random_cpu_flag){
   //enqueues the fiber into the chosen fiber thread's queue
  // fiber_queue *fiber_sched_queue = &(curr_thread->fiber_sched_queue);
   struct list_head *fiber_sched_queue = &(curr_thread->f_sched_queue);
-  FIBER_INFO("nk_fiber_run() : about to enqueue a fiber: %p cpu: %d\n", f, curr_thread->current_cpu); 
+  //DEBUG: Prints the fiber that is about to be enqueued and the CPU it will be enqueued on
+  //FIBER_INFO("nk_fiber_run() : about to enqueue a fiber: %p cpu: %d\n", f, curr_thread->current_cpu); 
   //fiber_queue_enqueue(fiber_sched_queue, f);
   list_add_tail(&(f->l_head), fiber_sched_queue);
 
   //if the fiber thread is sleeping, wake it up so it can start the fibers
   if(curr_thread->timer){
-    FIBER_INFO("nk_fiber_run() : waking fiber thread\n");
-    FIBER_INFO("nk_fiber_run() : curr_thread = %p %s timer = %p %s cpu = %d \n", curr_thread, curr_thread->name, curr_thread->timer, curr_thread->timer->name, curr_thread->current_cpu);
+    //DEBUG: Prints info whenever a fiber thread is awakened
+    //FIBER_INFO("nk_fiber_run() : waking fiber thread\n");
+    //FIBER_INFO("nk_fiber_run() : curr_thread = %p %s timer = %p %s cpu = %d \n", curr_thread, curr_thread->name, curr_thread->timer, curr_thread->timer->name, curr_thread->current_cpu);
     nk_timer_cancel(curr_thread->timer);
   }
 
@@ -144,29 +146,41 @@ int nk_fiber_start(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size
 int nk_fiber_yield(){
   // Get the fiber we are switching to
   nk_fiber_t *f_to = _rr_policy();
-  FIBER_INFO("The fiber picked to schedule is %p\n", f_to); 
+  //DEBUG: Indicates what fiber was picked to schedule
+  //FIBER_INFO("The fiber picked to schedule is %p\n", f_to); 
   nk_fiber_t *f_iter = NULL;
     struct list_head *f_sched = &(_get_fiber_thread()->f_sched_queue);
     list_for_each_entry(f_iter, f_sched, l_head){
-    FIBER_INFO("The fiber queue contains fiber: %p\n", f_iter);
+
+    //DEBUG: Will print out the fiber queue for this CPU's fiber thread
+    //FIBER_INFO("The fiber queue contains fiber: %p\n", f_iter);
     }
-    FIBER_INFO("Done printing out the fiber queue.\n");
-  //if f_to is 0, there are no fibers in the queue, and therefore there are no fibers to switch to
+    //DEBUG: Will indicate when fiber queue is done printing (to indicate whether queue is finite)
+    //FIBER_INFO("Done printing out the fiber queue.\n");
+
+  //if f_to is NULL, there are no fibers in the queue, and therefore there are no fibers to switch to
   // we can then exit early and sleep
   if(f_to == NULL){
    return 0;
   }
-
+  // Utility function to perform enqueue and other housekeeping
   return _nk_fiber_yield_to(f_to);
 }
 
 int nk_fiber_yield_to(nk_fiber_t *f_to){
   // remove f_to from its respective fiber queue
-  if(_check_all_queues_remove(f_to)){ 
-    FIBER_INFO("yield_to() : Failed to find fiber in queues :(\n");
+  if(_check_all_queues_remove(f_to)){
+    //DEBUG: Will indicate whether the fiber we're attempting to yield to was not found
+    //FIBER_INFO("yield_to() : Failed to find fiber in queues :(\n");
+    
+    // If the fiber could not be found, we need to pick a random fiber to yield to instead
     _nk_fiber_yield_to(_rr_policy());
+    // Return 1 to indicate failure
     return 1;
   }
+
+  // use utility function to perform rest of yield
+  // returns 0 to indicate we found and removed f_to from the queue and sucessfully yielded
   _nk_fiber_yield_to(f_to);
   return 0;
 }
@@ -299,8 +313,11 @@ nk_fiber_t* _rr_policy(){
  /* nk_fiber_t *fiber_to_schedule = fiber_queue_dequeue(fiber_sched_queue);
 */
   nk_thread_t *current_t = get_cur_thread();
-  FIBER_INFO("_rr_policy() : just dequeued a fiber : %p\n", fiber_to_schedule);
-  FIBER_INFO("_rr_policy() : current fiber is %p and idle fiber is %p\n", current_t->curr_fiber, cur_thread->idle_fiber); 
+  //DEBUG: prints the fiber that was just dequeued and indicates current and idle fiber
+  //FIBER_INFO("_rr_policy() : just dequeued a fiber : %p\n", fiber_to_schedule);
+  //FIBER_INFO("_rr_policy() : current fiber is %p and idle fiber is %p\n", current_t->curr_fiber, cur_thread->idle_fiber); 
+  
+  // Returns the fiber to schedule
   return fiber_to_schedule;
 }
 
@@ -314,7 +331,8 @@ int _nk_fiber_yield_to(nk_fiber_t *f_to){
     nk_thread_t *cur_thread = _get_fiber_thread();
     //fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue);
     struct list_head *fiber_sched_queue = &(cur_thread->f_sched_queue);
-    FIBER_INFO("nk_fiber_yield() : About to enqueue fiber: %p \n", f_from);
+    // DEBUG: Prints the fiber that's about to be enqueued
+    //FIBER_INFO("nk_fiber_yield() : About to enqueue fiber: %p \n", f_from);
     //fiber_queue_enqueue(fiber_sched_queue, f_from);
     list_add_tail(&(f_from->l_head), fiber_sched_queue);
   }
@@ -394,7 +412,8 @@ int _check_all_queues_remove(nk_fiber_t *to_del){
   for(int iter = 0; iter < cpu_iter; iter++){
     temp = &(sys->cpus[iter]->fiber_thread->f_sched_queue);
     list_for_each_entry(test, temp, l_head){
-      FIBER_INFO("_check_all_queues_remove() : %d outer loop and %p is the temp fiber\n", iter, test);
+      //DEBUG: Prints all the fibers (and queues) that are being checked
+      //FIBER_INFO("_check_all_queues_remove() : %d outer loop and %p is the temp fiber\n", iter, test);
       if(test->fid == to_del->fid){
         list_del_init(&(to_del->l_head));
         return  0;
