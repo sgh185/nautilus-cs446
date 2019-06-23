@@ -66,6 +66,33 @@ void fiber_outer(void *i, void **o)
   nk_vc_printf("Fiber outer is finished, a = %d\n", a);
 }
 
+void fiber_inner_join(void *i, void **o)
+{
+  nk_fiber_set_vc(vc);
+  int a = 0;
+  while(a < 10){
+    nk_vc_printf("Fiber inner a = %d\n", a++);
+    nk_fiber_yield();
+  }
+  nk_vc_printf("Fiber inner is finished, a = %d\n", a);
+}
+
+void fiber_outer_join(void *i, void **o)
+{
+  nk_fiber_set_vc(vc);
+  int a = 0;
+  while(a < 3){
+    nk_vc_printf("Fiber outer a = %d\n", a++);
+    nk_fiber_t *f_inner_join;
+    nk_fiber_start(fiber_inner_join, 0, 0, 0, 1, &f_inner_join);
+    nk_fiber_join(f_inner_join);
+    nk_fiber_yield();
+  }
+  nk_vc_printf("Fiber outer is finished, a = %d\n", a);
+}
+
+
+
 void fiber4(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
@@ -252,6 +279,15 @@ int test_yield_to()
   return 0;
 }
 
+int test_fiber_join()
+{
+  nk_fiber_t *f_outer_join;
+  vc = get_cur_thread()->vc;
+  nk_vc_printf("test_fiber_join() : virtual console %p\n", vc);
+  nk_fiber_start(fiber_outer_join, 0, 0, 0, 1, &f_outer_join);
+  return 0;
+}
+
 static int
 handle_fibers (char * buf, void * priv)
 {
@@ -284,6 +320,12 @@ handle_fibers4 (char * buf, void * priv)
   return 0;
 }
 
+static int
+handle_fibers5 (char * buf, void * priv)
+{
+  test_fiber_join();
+  return 0;
+}
 
 static struct shell_cmd_impl fibers_impl = {
   .cmd      = "fibertest",
@@ -309,7 +351,14 @@ static struct shell_cmd_impl fibers_impl4 = {
   .handler  = handle_fibers4,
 };
 
+static struct shell_cmd_impl fibers_impl5 = {
+  .cmd      = "fibertest5",
+  .help_str = "fibertest5",
+  .handler  = handle_fibers5,
+};
+
 nk_register_shell_cmd(fibers_impl);
 nk_register_shell_cmd(fibers_impl2);
 nk_register_shell_cmd(fibers_impl3);
 nk_register_shell_cmd(fibers_impl4);
+nk_register_shell_cmd(fibers_impl5);

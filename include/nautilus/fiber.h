@@ -74,11 +74,10 @@ typedef struct nk_fiber {
   struct nk_virtual_console *vc; // for printing
   int is_idle;
 
-  /* Only necessary if we decide to implement join/wait */
-  //nk_wait_queue_t *waitq; // wait queue for threads waiting on this thread
-  //int num_wait;           // how many wait queues this thread is currently on
+  struct fiber_queue *wait_queue; // wait queue for fibers waiting on this thread
+  int num_wait;           // how many wait queues this thread is currently on
   struct list_head l_head;
-
+  
   nk_fiber_fun_t fun;
   void *input;
   void **output;
@@ -154,10 +153,17 @@ typedef struct fiber_queue {
     nk_fiber_t *fibers[MAX_QUEUE];
 } fiber_queue ;
 
+static void fiber_queue_init(fiber_queue *queue);
 static int        fiber_queue_enqueue(fiber_queue *queue, nk_fiber_t *fiber);
 static nk_fiber_t* fiber_queue_dequeue(fiber_queue *queue);
 static nk_fiber_t* fiber_queue_remove(fiber_queue *queue, nk_fiber_t *fiber);
 static int        fiber_queue_empty(fiber_queue *queue);
+
+static void fiber_queue_init(fiber_queue *queue){
+  queue->size = 0;
+  queue->head = 0;
+  queue->tail = 0; 
+}
 
 static int fiber_queue_enqueue(fiber_queue *queue, nk_fiber_t *fiber)
 {

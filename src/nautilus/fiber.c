@@ -105,6 +105,11 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
   // Initializes the fiber's list field
   INIT_LIST_HEAD(&(fiber->l_head)); 
 
+  // Sets wait queue count to 0
+  fiber->num_wait = 0;
+  fiber->wait_queue = malloc(sizeof(struct fiber_queue));
+  fiber_queue_init(fiber->wait_queue);
+
   return 0;
 }
 
@@ -195,8 +200,15 @@ nk_fiber_t *nk_fiber_fork(){
   return NULL;
 }
 
-void nk_fiber_join(){
-
+void nk_fiber_join(nk_fiber_t *wait_on){
+  nk_fiber_t *curr_fiber = _nk_fiber_current();
+  FIBER_INFO("nk_fiber_join() : about to enqueue a fiber on the wait queue %p\n", wait_on->wait_queue);
+  // Not safe, need to lock before we enqueue
+  FIBER_INFO("nk_fiber_join() : the fiber is %p\n", curr_fiber);
+  fiber_queue_enqueue(wait_on->wait_queue, curr_fiber);
+  // Not safe, need to lock before we increment
+  curr_fiber->num_wait++;
+  nk_fiber_yield();
   return;
 }
 
@@ -327,7 +339,7 @@ int _nk_fiber_yield_to(nk_fiber_t *f_to){
   //FIBER_INFO("Current queue size is %d\n", _get_fiber_thread()->fiber_sched_queue.size);
  
  // Enqueue the current fiber
-  if(f_to->fid != f_from->fid) {
+  if(f_to->fid != f_from->fid && f_from->num_wait <= 0) {
     nk_thread_t *cur_thread = _get_fiber_thread();
     //fiber_queue *fiber_sched_queue = &(cur_thread->fiber_sched_queue);
     struct list_head *fiber_sched_queue = &(cur_thread->f_sched_queue);
@@ -351,12 +363,28 @@ int _nk_fiber_yield_to(nk_fiber_t *f_to){
 void _nk_fiber_exit(nk_fiber_t *f){
   // Get the idle fiber for the current CPU
   nk_fiber_t *idle = _nk_idle_fiber();
-  
+  nk_fiber_t *temp = 0xdeadbeef12345670ul;
+  // On exit, go through each fiber in wait queue
+  FIBER_INFO("_nk_fiber_exit() : queue size is %d\n", f->wait_queue->size);
+  while(f->wait_queue->size > 0){
+    FIBER_INFO("nk_fiber_exit() : made it here, queue is %p\n", f->wait_queue);
+    FIBER_INFO("nk_fiber_exit() : fiber tail %d, fiber head %d\n", f->wait_queue->head, f->wait_queue->tail);
+    temp = fiber_queue_dequeue(f->wait_queue);
+    FIBER_INFO("nk_fiber_exit() : Entered the queue loop. Curr is %p, temp is %p and size is %d\n", f, temp, f->wait_queue->size);
+    if(temp != 0){
+      temp->num_wait--;
+      FIBER_INFO("nk_fiber_exit() : got to the inner if, num wait is %d\n", temp->num_wait);
+      if(temp->num_wait <= 0){
+        nk_fiber_run(temp, 1);
+      }
+    }
+  }
   // Mark the current fiber as done (since we are exiting)
   f->is_done = 1;
 
   // Free the current fiber's memory (stack and stack ptr)
   free(f->stack);
+  free(f->wait_queue);
   free(f);
   
   // Switch back to the idle fiber using special exit function
