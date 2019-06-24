@@ -11,14 +11,14 @@
  * http://xstack.sandia.gov/hobbes
  *
  * Copyright (c) 2019, Michael A. Cuevas <cuevas@u.northwestern.edu>
- * Copyright (c) 2019, Enrico Deiana <3nric000@gmail.com>
+ * Copyright (c) 2019, Enrico Deiana <ead@u.northwestern.edu>
  * Copyright (c) 2019, Peter A. Dinda <pdinda@northwestern.edu>
  * Copyright (c) 2019, The V3VEE Project  <http://www.v3vee.org> 
  *                     The Hobbes Project <http://xstack.sandia.gov/hobbes>
  * All rights reserved.
  *
  * Authors: Michael A. Cuevas <cuevas@u.northwestern.edu>
- *          Enrico Deiana <3nric000@gmail.com>
+ *          Enrico Deiana <ead@u.northwestern.edu>
  *          Peter A. Dinda <pdinda@northwestern.edu>
  *
  * This is free software.  You are permitted to use,
