@@ -160,9 +160,7 @@ static nk_fiber_t* fiber_queue_remove(fiber_queue *queue, nk_fiber_t *fiber);
 static int        fiber_queue_empty(fiber_queue *queue);
 
 static void fiber_queue_init(fiber_queue *queue){
-  queue->size = 0;
-  queue->head = 0;
-  queue->tail = 0; 
+  memset(queue, 0, sizeof(fiber_queue));
 }
 
 static int fiber_queue_enqueue(fiber_queue *queue, nk_fiber_t *fiber)

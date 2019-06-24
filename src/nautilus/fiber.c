@@ -51,6 +51,7 @@
 
 extern void nk_fiber_context_switch(nk_fiber_t *cur, nk_fiber_t *next);
 extern void _exit_switch(nk_fiber_t *next);
+extern nk_fiber_t *nk_fiber_fork_switch(nk_fiber_t *f_from, nk_fiber_t *f_to);
 
 /******** EXTERNAL INTERFACE **********/
 
@@ -196,8 +197,36 @@ int nk_fiber_conditional_yield(nk_fiber_t *fib, uint8_t (*cond_function)(void *)
 }
 
 nk_fiber_t *nk_fiber_fork(){
+  // current fiber is fetched
+  nk_fiber_t *curr = _nk_fiber_current();
+  
+  // new fiber struct is allocated using current fiber's data
+  nk_fiber_t *new;
+  nk_fiber_create(curr->fun, curr->input, 0, curr->stack_size, &new);
+  
+  // current fiber's stack is copied to new fiber
+  memcpy(new->stack, curr->stack, curr->stack_size);
+  new->num_wait = curr->num_wait;
+  memcpy(new->wait_queue, curr->wait_queue, sizeof(curr->wait_queue));
 
-  return NULL;
+  // reference counts of fibers in the wait queue are incremented
+  fiber_queue *newq = new->wait_queue;
+  nk_fiber_t *temp;
+  for(int iter = 0; iter < newq->size; iter++){
+    temp = newq->fibers[newq->head + iter];
+    if(temp != 0){
+      temp->num_wait++;
+    }
+  }
+  // add the original fiber back to the sched queue
+  nk_thread_t *cur_thread = _get_fiber_thread();
+  struct list_head *fiber_sched_queue = &(cur_thread->f_sched_queue);
+  list_add_tail(&(curr->l_head), fiber_sched_queue);
+
+  // switch to the new fiber
+  get_cur_thread()->curr_fiber = new;
+  nk_fiber_t *ret = nk_fiber_fork_switch(curr, new);
+  return ret;
 }
 
 void nk_fiber_join(nk_fiber_t *wait_on){
