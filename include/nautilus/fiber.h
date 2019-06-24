@@ -59,8 +59,6 @@ typedef struct nk_thread nk_thread_t;
 
 typedef void (*nk_fiber_fun_t)(void *input, void **output);
 
-// All code above was copied from thread.h
-// I thought it would be a good place to start for headers
 
 typedef struct nk_fiber {
   uint64_t rsp;                /* +0  SHOULD NOT CHANGE POSITION */
@@ -72,17 +70,17 @@ typedef struct nk_fiber {
   unsigned long fid; /* Fiber ID, may not be needed? */
 
   struct nk_virtual_console *vc; // for printing
-  int is_idle;
+  int is_idle; // indicates whether this is the idle fiber
 
   struct fiber_queue *wait_queue; // wait queue for fibers waiting on this thread
   int num_wait;           // how many wait queues this thread is currently on
-  struct list_head l_head;
+  struct list_head l_head; // sched queue node
   
-  nk_fiber_fun_t fun;
-  void *input;
-  void **output;
+  nk_fiber_fun_t fun; // routine the fiber will execute
+  void *input;  // input for the fiber's routine
+  void **output;  // output for the fiber's routine
 
-  uint8_t is_done;
+  uint8_t is_done; //indicates whether the fiber is done (for reaping?)
 } nk_fiber_t;
 
 // Create a fiber but do not launch it
@@ -101,6 +99,7 @@ int nk_fiber_start(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size
 int nk_fiber_yield();
 
 // Yield that allows choice of fiber to yield to
+// Will yield to a random fiber if f_to is not available to yield to
 int nk_fiber_yield_to(nk_fiber_t *f_to);
 
 // Takes a fiber, a condition to yield on, and a function to check that condition
@@ -110,16 +109,16 @@ int nk_fiber_conditional_yield(nk_fiber_t *fib, uint8_t (*cond_function)(void *)
 // Returns a ptr to the current fiber
 nk_fiber_t *_nk_fiber_current();
 
-// Not needed for initial implementation
+// returns a copy of the currently running fiber with a new FID
 nk_fiber_t *nk_fiber_fork();
 
-// Not needed for inital implementation
-void nk_fiber_join();
+// Causes the currently running fiber to wait on the specified fiber 
+void nk_fiber_join(nk_fiber_t *wait_on);
 
 // Set virtual console
 void nk_fiber_set_vc(struct nk_virtual_console *vc);
 
-// TODO: condier to hide the internal interface from the user
+// TODO: condier hiding the Internal Interface from the user
 /******** INTERNAL INTERFACE **********/
 void _fiber_push(nk_fiber_t * f, uint64_t x);
 
