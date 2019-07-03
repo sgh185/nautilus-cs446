@@ -1,11 +1,7 @@
-#include <vector>
-#include <set>
-#include <unordered_map>
-#include <map>
-#include <queue>
 #include "llvm/Pass.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Support/raw_ostream.h"
@@ -22,7 +18,10 @@ using namespace llvm;
 using namespace std;
 
 /* *** Basic pass to insert a function call every 50 lines of code. *** 
- * NOTE: 
+ * 
+ * Technical issues:
+ * - Injecting function that doesn't exist in current module (i.e. yield)
+ * - 
  * 
  */
 
@@ -31,15 +30,15 @@ const Function *YIELD = NULL; // NOTE: the yield function itself is unlikely to 
 
 namespace
 {
-// Useful to print out later.
+// Useful to print out information later.
 struct debugInfo
 {
-    // Code injection info
+    // Simple stats right now
+
+    // Code injection info:
     int64_t totalLines;
     int64_t totalInjections;
-    int64_t failedInjections = 0; // May not need
-
-    // Inlining info
+    // int64_t failedInjections // May not need
 };
 
 struct CIY : public ModulePass
@@ -63,7 +62,8 @@ struct CIY : public ModulePass
         if (YIELD = NULL)
             return false;
 
-        // ----------------------------------------------------------------
+        DI = new debugInfo();
+
         // Debugging info
         int64_t lines = 0;
         for (auto &F : M)
@@ -72,12 +72,14 @@ struct CIY : public ModulePass
                 lines += B.size();
         }
         DI->totalLines = lines;
-        // ----------------------------------------------------------------
+
+        // ANALYZING --- analye the module, highlight blocks where injecting a yield may not be a good idea
+        // analyzeModule(DI, M); --- not written yet
+
+        CallGraph &CG = getAnalysis<CallGraphWrapperPass>().getCallGraph();
 
         // INLINING --- optional at the moment
         /*
-        CallGraph &CG = getAnalysis<CallGraphWrapperPass>().getCallGraph();
-
         for (auto &F : M)
         {
             if (F.empty())
@@ -86,7 +88,26 @@ struct CIY : public ModulePass
         }
         */
 
-        // insert function call
+        // INJECTING --- insert function call
+        injectYield(DI, M);
+
+        // Cleanup
+        printDebugInfo(DI);
+        free(DI);
+
+        return false;
+    }
+
+    /*
+    bool onFunction(Function &F) 
+    {
+        return false;
+    }
+    */
+
+    void injectYield(debugInfo *DI, Module &M)
+    {
+        int64_t count = 0;
 
         for (auto &F : M)
         {
@@ -94,11 +115,22 @@ struct CIY : public ModulePass
             {
                 for (auto &I : B)
                 {
-                                }
+                    count++;
+                    if (count == 50)
+                    {
+                        // inject yield call
+                        IRBuilder<> builder{I};
+                        CallInst *yield = builder.CreateCall(YIELD, NULL); // no arguments
+                        //CallInst *yield = CallInst::Create(YIELD, NULL, "nk_fiber_yield");
+
+                        count = 0;
+                        DI->totalInjections++; // debugging info
+                    }
+                }
             }
         }
 
-        return false;
+        return;
     }
 
     void inlineF(Function &F, CallGraph &CG)
@@ -149,16 +181,16 @@ struct CIY : public ModulePass
         return;
     }
 
-    /*
-    bool onFunction(Function &F) 
+    void printDebugInfo(debugInfo *DI)
     {
-        return false;
+        errs() << "Total Lines: " << DI->totalLines << "\n";
+        errs() << "Total Injections: " << DI->totalInjections << "\n";
+        return;
     }
-    */
 
     void getAnalysisUsage(AnalysisUsage &AU) const override
     {
-        AU.setPreservesAll();
+        AU.addRequired<CallGraphWrapperPass>();
         return;
     }
 };
@@ -174,3 +206,4 @@ static RegisterStandardPasses _RegPass1(PassManagerBuilder::EP_OptimizerLast,
 static RegisterStandardPasses _RegPass2(PassManagerBuilder::EP_EnabledOnOptLevel0,
                                         [](const PassManagerBuilder &, legacy::PassManagerBase &PM) {
         if(!_PassMaker){ PM.add(_PassMaker = new CIY()); } })
+
