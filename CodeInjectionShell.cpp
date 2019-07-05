@@ -27,7 +27,7 @@ using namespace std;
  * 
  * Technical issues:
  * - [PARTIALLY SOLVED] Injecting function that doesn't exist in current module (i.e. yield)
- *   Ideas --- Function::Create (with IRBuilder) will create a shell, stil could have an empty body (THIS SOLUTION CHOSEN)
+ *   Ideas --- getOrCreateFunction will create a shell, stil could have an empty body (THIS SOLUTION CHOSEN)
  *         --- add necessary files in addition to the -CIY flag upon compilation (Simone's solution?)
  *         --- write a function that extracts nk_fiber_yield from some Nautilus source file and keeps it in this module
  * 
@@ -58,12 +58,12 @@ struct debugInfo
     // int64_t failedInjections // May not need
 };
 
-struct CIY : public ModulePass
+struct CAT : public ModulePass
 {
     static char ID;
     debugInfo *DI;
 
-    CIY() : ModulePass(ID) {}
+    CAT() : ModulePass(ID) {}
 
     bool doInitialization(Module &M) override
     {
@@ -265,14 +265,14 @@ struct CIY : public ModulePass
 };
 } // namespace
 
-char CIY::ID = 0;
-static RegisterPass<CIY> X("CIY", "Shell for code injection --- yields");
+char CAT::ID = 0;
+static RegisterPass<CAT> X("CIY", "Shell for code injection --- yields");
 
-static CIY *_PassMaker = NULL;
+static CAT *_PassMaker = NULL;
 static RegisterStandardPasses _RegPass1(PassManagerBuilder::EP_OptimizerLast,
                                         [](const PassManagerBuilder &, legacy::PassManagerBase &PM) {
-        if(!_PassMaker){ PM.add(_PassMaker = new CIY());} });
+        if(!_PassMaker){ PM.add(_PassMaker = new CAT());} });
 static RegisterStandardPasses _RegPass2(PassManagerBuilder::EP_EnabledOnOptLevel0,
                                         [](const PassManagerBuilder &, legacy::PassManagerBase &PM) {
-        if(!_PassMaker){ PM.add(_PassMaker = new CIY()); } });
+        if(!_PassMaker){ PM.add(_PassMaker = new CAT()); } });
 
