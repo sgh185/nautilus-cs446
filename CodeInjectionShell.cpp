@@ -1,23 +1,24 @@
-#include <vector>
 #include "llvm/Pass.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/Constants.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
-#include "llvm/ADT/SparseBitVector.h"
-#include "llvm/IR/CFG.h"
-#include "llvm/IR/Constants.h"
-#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/CallGraph.h"
-#include "llvm/IR/LLVMContext.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+
+#include <vector>
 
 using namespace llvm;
 using namespace std;
+
+#define DEBUG 1
 
 #define MARKER "p6pbbUlpLo0BL1bM2k8K"
 #define YIELD_CALL "nk_fiber_yield"
@@ -25,8 +26,8 @@ using namespace std;
 /* *** Basic pass to insert the "nk_fiber_yield" function call every 50 lines of code. *** 
  * 
  * Technical issues:
- * - Injecting function that doesn't exist in current module (i.e. yield)
- *   Ideas --- getOrCreateFunction will create a shell, stil could have an empty body
+ * - [PARTIALLY SOLVED] Injecting function that doesn't exist in current module (i.e. yield)
+ *   Ideas --- Function::Create (with IRBuilder) will create a shell, stil could have an empty body (THIS SOLUTION CHOSEN)
  *         --- add necessary files in addition to the -CIY flag upon compilation (Simone's solution?)
  *         --- write a function that extracts nk_fiber_yield from some Nautilus source file and keeps it in this module
  * 
@@ -40,7 +41,6 @@ using namespace std;
  * 
  */
 
-Function *YIELD = NULL;
 Function *MARKER_FUNC = NULL; // A dummy function --- if this function exists, terminate the pass (will occur after one invocation)
 
 namespace
@@ -67,24 +67,7 @@ struct CIY : public ModulePass
 
     bool doInitialization(Module &M) override
     {
-        // Look for nk_fiber_yield and the marker name, set the function vars if they exist
-
-        // ---- FIX ----
-
-        // Generic yield call (per Cuevas)
-        /*
-        auto yield = M.getFunction(YIELD_CALL);
-        if (yield != NULL)
-            YIELD = yield;
-        */
-
-        // ---- FIX ----
-
-        // Right now --- Simone's 323 code for debugging
-        auto yield = M.getFunction("CAT_new");
-        if (yield != NULL)
-            YIELD = yield;
-
+        // Look for the marker name, set the global marker function var if it exists
         auto marker = M.getFunction(MARKER);
         if (marker != NULL)
             MARKER_FUNC = marker;
@@ -94,15 +77,22 @@ struct CIY : public ModulePass
 
     bool runOnModule(Module &M) override
     {
-        // If nk_fiber_yield is not present, terminate pass
-        if (YIELD = NULL)
-            return false;
-
         // If the marker function exists, terminate pass
         if (MARKER_FUNC != NULL)
             return false;
 
-        // to print later
+        // Declare yield in the module first
+        LLVMContext &Context = M.getContext();
+        IRBuilder<> builder(Context);
+        FunctionType *FT_int = FunctionType::get(builder.getInt32Ty(), false);
+        Function *yield_func = Function::Create(FT_int, Function::ExternalLinkage, YIELD_CALL, M);
+
+        // If nk_fiber_yield is not declared properly, terminate pass
+        // ---- FIX ---- (more appropriate way to track function declaration)
+        if (yield_func->getName() != YIELD_CALL)
+            return false;
+
+        // To print later
         DI = new debugInfo();
 
         // Debugging info
@@ -114,19 +104,20 @@ struct CIY : public ModulePass
         }
         DI->totalLines = lines;
 
-        // declare marker function
-        LLVMContext &Context = M.getContext();
-        IRBuilder<> builder(Context);
-        FunctionType *FT = FunctionType::get(builder.getInt32Ty(), false);
-        Function *marker_func = Function::Create(FT, Function::ExternalLinkage, MARKER, M);
-        DI->marker_exists = true;
+        // Declare marker function
+        FunctionType *FT_void = FunctionType::get(builder.getVoidTy(), false);
+        Function *marker_func = Function::Create(FT_void, Function::ExternalLinkage, MARKER, M);
 
-        // ANALYZING --- analye the module, highlight blocks where injecting a yield may not be a good idea
-        // TODO: analyzeModule(DI, M);
+        if (marker_func->getName() == MARKER)
+            DI->marker_exists = true;
 
-        // INLINING --- optional at the moment
-        CallGraph &CG = getAnalysis<CallGraphWrapperPass>().getCallGraph();
         /*
+        ANALYZING --- analye the module, highlight blocks where injecting a yield may not be a good idea
+        TODO: analyzeModule(DI, M);
+
+        INLINING --- optional at the moment
+        CallGraph &CG = getAnalysis<CallGraphWrapperPass>().getCallGraph();
+
         for (auto &F : M)
         {
             if (F.empty())
@@ -136,14 +127,12 @@ struct CIY : public ModulePass
         */
 
         // INJECTING --- insert function call
-
-        // ---- FIX ----
-        // Having to recreate nk_fiber_yield becuase it doesn't exist in the current module
-        Function *yield_dummy_func = Function::Create(FT, Function::ExternalLinkage, YIELD_CALL, M);
-        injectYield(DI, M);
+        injectYield(DI, M, yield_func);
 
         // Cleanup
+#if DEBUG == 1
         printDebugInfo(DI);
+#endif
         free(DI);
 
         return false;
@@ -156,20 +145,10 @@ struct CIY : public ModulePass
     }
     */
 
-    void injectYield(debugInfo *DI, Module &M)
+    void injectYield(debugInfo *DI, Module &M, Function *funcToInsert)
     {
         int64_t count = 0;
         vector<Instruction *> InstructionsToInject;
-
-        // ---- FIX ---- extra code added to find the dummy nk_fiber_yield function
-        Function *yield_func_dummy = NULL;
-
-        auto dummy = M.getFunction(YIELD_CALL);
-        if (dummy != NULL)
-            yield_func_dummy = dummy;
-
-        if (yield_func_dummy == NULL)
-            return;
 
         // Mark locations to inject
         for (auto &F : M)
@@ -181,6 +160,11 @@ struct CIY : public ModulePass
                     count++;
                     if (count == 3)
                     {
+#if DEBUG == 1
+                        errs() << "\nCurrrent instruction push_back: ";
+                        I.print(errs());
+                        errs() << "\n";
+#endif
                         InstructionsToInject.push_back(&I);
                         count = 0;
                     }
@@ -188,13 +172,27 @@ struct CIY : public ModulePass
             }
         }
 
-        // Inject instructions
+        // Build CallInst to yield, insert into module
         for (auto i : InstructionsToInject)
         {
+#if DEBUG == 1
+            errs() << "\n\nCurrent instruction from InstructionsToInject: ";
+            i->print(errs());
+            errs() << "\n";
+#endif
+
             // inject yield call
             IRBuilder<> builder{i};
-            CallInst *yieldCall = builder.CreateCall(yield_func_dummy, None);
-            // CallInst *yieldCall = builder.CreateCall(yield_func, None);
+            CallInst *yieldCall = builder.CreateCall(funcToInsert, None);
+
+#if DEBUG == 1
+            errs() << "yieldCall CallInst: ";
+            yieldCall->print(errs());
+            errs() << "\n";
+            Function *callee = yieldCall->getCalledFunction();
+            if (callee->getName() == YIELD_CALL)
+                errs() << "yieldCall function matches nk_fiber_yield\n";
+#endif
 
             DI->totalInjections++; // debugging info
         }
@@ -252,6 +250,7 @@ struct CIY : public ModulePass
 
     void printDebugInfo(debugInfo *DI)
     {
+        errs() << "\n\n\nDEBUGGING INFO\n";
         errs() << "Total Lines: " << DI->totalLines << "\n";
         errs() << "Total Injections: " << DI->totalInjections << "\n";
         errs() << "Marker Exists: " << DI->marker_exists << "\n";
