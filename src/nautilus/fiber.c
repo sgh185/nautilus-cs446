@@ -48,10 +48,14 @@
 #define FIBER_ERROR(fmt, args...) ERROR_PRINT("Fiber: " fmt, ##args)
 #define FIBER_DEBUG(fmt, args...) DEBUG_PRINT("Fiber: " fmt, ##args)
 #define FIBER_WARN(fmt, args...)  WARN_PRINT("Fiber: " fmt, ##args)
+#define LAUNCHPAD 16
+#define STACK_CLONE_DEPTH 2
+#define GPR_RAX_OFFSET 8
 
 extern void nk_fiber_context_switch(nk_fiber_t *cur, nk_fiber_t *next);
 extern void _exit_switch(nk_fiber_t *next);
-extern nk_fiber_t *nk_fiber_fork_switch(nk_fiber_t *f_from, nk_fiber_t *f_to);
+extern nk_fiber_t *nk_fiber_fork();
+extern void _nk_fiber_fork_exit();
 
 /******** EXTERNAL INTERFACE **********/
 
@@ -202,40 +206,100 @@ int nk_fiber_conditional_yield(nk_fiber_t *fib, uint8_t (*cond_function)(void *)
   return 0;
 }
 
-nk_fiber_t *nk_fiber_fork(){
+nk_fiber_t *__nk_fiber_fork(){
   // Fetch current fiber
   nk_fiber_t *curr = _nk_fiber_current();
+
+  // Variables needed to hold stack frame information
+  uint64_t size, alloc_size;
+  uint64_t     rbp1_offset_from_ret0_addr;
+  uint64_t     rbp_stash_offset_from_ret0_addr;
+  uint64_t     rbp_offset_from_ret0_addr;
+  void         *child_stack;
+  uint64_t     rsp;
+
+  // Store the value of %rsp into var rsp and clobber memory
+  __asm__ __volatile__ ( "movq %%rsp, %0" : "=r"(rsp) : : "memory");
+ 
+  void *rbp0      = __builtin_frame_address(0);                   // current rbp, *rbp0 = rbp1
+  void *rbp1      = __builtin_frame_address(1);                   // caller rbp, *rbp1 = rbp2  (forker's frame)
+  void *rbp_tos   = __builtin_frame_address(STACK_CLONE_DEPTH);   // should scan backward to avoid having this be zero or crazy
+  void *ret0_addr = rbp0 + 8;
+    // this is the address at which the fork wrapper (nk_fiber_fork) stashed
+    // the current value of rbp - this must conform to the REG_SAVE model
+    // in fiber.h
+  void *rbp_stash_addr = ret0_addr + 10*8; 
   
+  // from last byte of tos_rbp to the last byte of the stack on return from this function 
+    // (return address of wrapper)
+    // the "launch pad" is added so that in the case where there is no stack frame above the caller
+    // we still have the space to fake one.
+  size = (rbp_tos + 8) - ret0_addr + LAUNCHPAD;
+  rbp1_offset_from_ret0_addr = rbp1 - ret0_addr;
+
+  rbp_stash_offset_from_ret0_addr = rbp_stash_addr - ret0_addr;
+  rbp_offset_from_ret0_addr = (*(void**)rbp_stash_addr) - ret0_addr;
+  alloc_size = curr->stack_size;
+ 
   // Allocate new fiber struct using current fiber's data
   nk_fiber_t *new;
-  nk_fiber_create(curr->fun, curr->input, 0, curr->stack_size, &new);
+  nk_fiber_create(NULL, NULL, 0, alloc_size, &new);
   
   // current fiber's stack is copied to new fiber
-  memcpy(new->stack, curr->stack, curr->stack_size);
-  memcpy(new->wait_queue, curr->wait_queue, sizeof(curr->wait_queue));
+  _fiber_push(new, (uint64_t)&_nk_fiber_cleanup);  
   
-  // Other important data is copied
-  new->num_wait = curr->num_wait;
+  child_stack = new->stack;
+  memcpy(child_stack + alloc_size - size, ret0_addr, size - LAUNCHPAD);
+  new->rsp = (uint64_t)(child_stack + alloc_size - size + 0x8);
   
-  // Reference counts of fibers in the wait queue are incremented
-  // MAC: TODO ask Peter if this is necessary, will joining fibers also wait on forked fibers?
-  fiber_queue *newq = new->wait_queue;
-  nk_fiber_t *temp;
-  for(int iter = 0; iter < newq->size; iter++){
-    temp = newq->fibers[(newq->head + iter) % MAX_QUEUE];
-    if(temp != 0){
-      temp->num_wait++;
-    }
-  }
-  // Add the original fiber back to the sched queue
+  // Update the child's snapshot of rbp on its stack (that was done
+   // by nk_thread_fork()) with the corresponding position in the child's stack
+   // when nk_thread_fork() unwinds the GPRs, it will end up with rbp pointing
+   // into the cloned stack
+  void **rbp_stash_ptr = (void**)(new->rsp + rbp_stash_offset_from_ret0_addr);
+  *rbp_stash_ptr = (void*)(new->rsp + rbp_offset_from_ret0_addr);
+
+  // Determine caller's rbp copy and return addres in the child stack
+  void **rbp2_ptr = (void**)(new->rsp + rbp1_offset_from_ret0_addr);
+  void **ret2_ptr = rbp2_ptr/*+1*/;
+   
+  // rbp2 we don't care about since we will not not
+  // return from the caller in the child, but rather go into the thread cleanup
+  *rbp2_ptr = 0x0ULL;
+
+  // fix up the return address to point to our thread cleanup function
+  // so when caller returns, the thread exists
+  *ret2_ptr = &_nk_fiber_cleanup;
+
+  // now we need to setup the interrupt stack etc.
+  // we provide null for thread func to indicate this is a fork
+  //new->fun = &_nk_fiber_cleanup; 
+  //_nk_fiber_fork_init(new); 
+
+ 
+
+  //DEBUG: Printing the fibers data
+  FIBER_INFO("nk_fiber_fork() : printing fiber data for curr fiber. ptr %p, stack ptr %p\n", curr, curr->rsp);
+  FIBER_INFO("nk_fiber_fork() : printing fiber data for new fiber. ptr %p, stack ptr %p\n", new, new->rsp); 
+  //new->rsp += (uint64_t) (curr->stack - curr->rsp);
+  FIBER_INFO("nk_fiber_fork() : printing fiber data for new fiber. ptr %p, stack ptr %p\n", new, new->rsp);  
+
+  /* Add the original fiber back to the sched queue
   nk_thread_t *cur_thread = _get_fiber_thread();
   struct list_head *fiber_sched_queue = &(cur_thread->f_sched_queue);
   list_add_tail(&(curr->l_head), fiber_sched_queue);
-
+  
+  //DEBUG: Prints Enqueued info
+  FIBER_INFO("nk_fiber_fork() : just enqueued fiber %p\n", curr);
+ *
   // Switch to the new fiber
   get_cur_thread()->curr_fiber = new;
   nk_fiber_t *ret = nk_fiber_fork_switch(curr, new);
-  return ret;
+  FIBER_INFO("nk_fiber_fork() : just switched to the new fiber\n");
+  */
+  *(uint64_t*)(new->rsp+GPR_RAX_OFFSET) = 0xdeadbeefdeadbeeful;
+  nk_fiber_run(new, 0); 
+  return new;
 }
 
 void nk_fiber_join(nk_fiber_t *wait_on){
@@ -346,6 +410,29 @@ void _nk_fiber_init(nk_fiber_t *f){
 
   return;
 }
+
+void _nk_fiber_fork_init(nk_fiber_t *f){
+  _fiber_push(f, (uint64_t) _nk_fiber_cleanup);
+  _fiber_push(f, 0);
+  _fiber_push(f, 0xdeadbeef12345671ul);
+  _fiber_push(f, 0xdeadbeef12345672ul);
+  _fiber_push(f, 0xdeadbeef12345673ul);
+  _fiber_push(f, 0xdeadbeef12345674ul);
+  _fiber_push(f, (uint64_t) f);
+  _fiber_push(f, 0xdeadbeef12345675ul);
+  _fiber_push(f, 0xdeadbeef12345676ul);
+  _fiber_push(f, 0xdeadbeef12345677ul);
+  _fiber_push(f, 0xdeadbeef12345678ul);
+  _fiber_push(f, 0xdeadbeef12345679ul);
+  _fiber_push(f, 0xdeadbeef1234567aul);
+  _fiber_push(f, 0xdeadbeef1234567bul);
+  _fiber_push(f, 0xdeadbeef1234567cul);
+  _fiber_push(f, 0xdeadbeef1234567dul);
+
+  return;
+}
+
+
 
 nk_fiber_t* _nk_fiber_current(){
   // returns the current CPU's current fiber
@@ -460,11 +547,16 @@ void _nk_fiber_exit(nk_fiber_t *f){
   free(f->stack);
   free(f->wait_queue);
   free(f);
-  
+
   // Switch back to the idle fiber using special exit function
   _exit_switch(idle);
 
   return;
+}
+
+void _nk_fiber_cleanup(){
+  nk_fiber_t *curr = _nk_fiber_current();
+  _nk_fiber_exit(curr);
 }
 
 uint8_t _is_idle_fiber(nk_fiber_t *f){

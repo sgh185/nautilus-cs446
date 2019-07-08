@@ -50,12 +50,18 @@ ENTRY(_exit_switch)
     FIBER_RESTORE_GPRS()
     retq
 
-ENTRY(nk_fiber_fork_switch)
-    movq %rsi, %rax
+ENTRY(nk_fiber_fork)
     FIBER_SAVE_GPRS()
-//    SAVE_FPRS()
-    movq %rsp, 0x0(%rdi)
-    movq 0x0(%rsi), %rsp
-    movq 0x0, %rax 
+    callq __nk_fiber_fork
+
+ENTRY(_nk_fiber_fork_exit)
+    FIBER_RESTORE_GPRS_NOT_RAX()
     retq
+//    SAVE_FPRS()
+    //movq 0x0(%rsi), %rax
+    //movq %rsp, 0x0(%rdi)
+    //movq 0x0(%rsi), %rsp
+    //FIBER_RESTORE_GPRS()
+    //xorq %rax, %rax 
+    //retq
 

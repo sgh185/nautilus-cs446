@@ -120,11 +120,19 @@ void nk_fiber_set_vc(struct nk_virtual_console *vc);
 
 // TODO: condier hiding the Internal Interface from the user
 /******** INTERNAL INTERFACE **********/
+nk_fiber_t *__nk_fiber_fork();
+
+void _nk_fiber_fork_exit();
+
+void _nk_fiber_cleanup();
+
 void _fiber_push(nk_fiber_t * f, uint64_t x);
 
 void _fiber_wrapper(nk_fiber_t * f_to);
 
 void _nk_fiber_init(nk_fiber_t *f);
+
+void _nk_fiber_fork_init(nk_fiber_t *f);
 
 nk_fiber_t* _nk_fiber_current();
 
@@ -279,6 +287,24 @@ static void fiber_queue_dump(fiber_queue *queue, char *pre)
     movq 104(%rsp), %rbx; \
     movq 112(%rsp), %rax; \
     addq $120, %rsp; 
+
+#define FIBER_RESTORE_GPRS_NOT_RAX() \
+    movq (%rsp), %r15; \
+    movq 8(%rsp), %r14; \
+    movq 16(%rsp), %r13; \
+    movq 24(%rsp), %r12; \
+    movq 32(%rsp), %r11; \
+    movq 40(%rsp), %r10; \
+    movq 48(%rsp), %r9; \
+    movq 56(%rsp), %r8; \
+    movq 64(%rsp), %rbp; \
+    movq 72(%rsp), %rdi; \
+    movq 80(%rsp), %rsi; \
+    movq 88(%rsp), %rdx; \
+    movq 96(%rsp), %rcx; \
+    movq 104(%rsp), %rbx; \
+    addq $120, %rsp; 
+
 
 #ifdef __cplusplus
 }

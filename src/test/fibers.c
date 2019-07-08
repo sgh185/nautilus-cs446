@@ -229,7 +229,8 @@ void fiber_fork(void *i, void **o)
   nk_fiber_t *f_new;
   f_new = nk_fiber_fork();
   while(a < 5){
-    nk_vc_printf("fiber_fork() : This is the %dth iteration of fiber %p\n", a++, f_new);
+    //nk_fiber_t *f_curr = _nk_fiber_current();
+    nk_vc_printf("fiber_fork() : This is the %dth iteration of fiber %p\n"/* and curr_f is %p\n"*/, a++, f_new/*, f_curr*/);
     nk_fiber_yield();
   }
   nk_vc_printf("fiber 4 is finished, a = %d\n", a);
