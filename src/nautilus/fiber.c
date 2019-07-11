@@ -50,7 +50,7 @@
 #define FIBER_WARN(fmt, args...)  WARN_PRINT("Fiber: " fmt, ##args)
 #define LAUNCHPAD 16
 #define STACK_CLONE_DEPTH 2
-#define GPR_RAX_OFFSET 0x8
+#define GPR_RAX_OFFSET 0x70
 
 extern void nk_fiber_context_switch(nk_fiber_t *cur, nk_fiber_t *next);
 extern void _exit_switch(nk_fiber_t *next);
@@ -113,8 +113,13 @@ int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_siz
   // Sets wait queue count to 0
   fiber->num_wait = 0;
   fiber->wait_queue = malloc(sizeof(struct fiber_queue));
-  memset(fiber->wait_queue, 0, sizeof(struct fiber_queue));
+  // Checks to see if malloc failed
+  if(!(fiber->wait_queue)){
+    return  -EINVAL;
+  }
+  // initializes fiber wait queue to 0
   fiber_queue_init(fiber->wait_queue);
+
   return 0;
 }
 
@@ -202,8 +207,11 @@ int nk_fiber_yield_to(nk_fiber_t *f_to){
 }
 
 int nk_fiber_conditional_yield(nk_fiber_t *fib, uint8_t (*cond_function)(void *), void *state){
- //MAC: TODO when back on campus
-  return 0;
+  if(cond_function(state)){
+    nk_fiber_yield();
+    return 0;
+  }
+  return 1;
 }
 
 nk_fiber_t *__nk_fiber_fork(){
@@ -252,6 +260,7 @@ nk_fiber_t *__nk_fiber_fork(){
   memcpy(child_stack + alloc_size - size, ret0_addr, size - LAUNCHPAD);
   new->rsp = (uint64_t)(child_stack + alloc_size - size + 0x8);
   
+
   // Update the child's snapshot of rbp on its stack (that was done
    // by nk_thread_fork()) with the corresponding position in the child's stack
    // when nk_thread_fork() unwinds the GPRs, it will end up with rbp pointing
@@ -297,7 +306,7 @@ nk_fiber_t *__nk_fiber_fork(){
   nk_fiber_t *ret = nk_fiber_fork_switch(curr, new);
   FIBER_INFO("nk_fiber_fork() : just switched to the new fiber\n");
   */
-  *(uint64_t*)(new->rsp+GPR_RAX_OFFSET) = 0xdeadbeefdeadbeeful;
+  *(uint64_t*)(new->rsp+GPR_RAX_OFFSET) = 0x0ul;
   nk_fiber_run(new, 0); 
   return new;
 }
