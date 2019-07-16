@@ -132,6 +132,8 @@ void _fiber_wrapper(nk_fiber_t * f_to);
 
 void _nk_fiber_init(nk_fiber_t *f);
 
+void _nk_fiber_debug_init(nk_fiber_t *f);
+
 nk_fiber_t* _nk_fiber_current();
 
 nk_fiber_t* _nk_idle_fiber();

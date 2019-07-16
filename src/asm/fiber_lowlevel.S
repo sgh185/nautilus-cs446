@@ -24,13 +24,33 @@
 #include <nautilus/fiber.h>
 
 /* 
- * We come in like this:
- * ----------
- * ret addr
- * ----------
+ * Fiber we're switching to has a stack set up like this:
+ * 
+ * -------------------
+ * ret addr to next instruction in fiber's routine
+ * (or to _fiber_wrapper if we're starting fiber)
+ * -------------------
+ * GPR Values (%rax through %rsi)
+ * %rdi: ptr to fiber we're switching to
+ * Remaining GPR Values (%rbp through %r15)
+ * -------------------
+ * 
+ * Full stack state can be found in FIBER_SAVE_GPRS() 
+ * macro in include/nautilus/fiber.h
  *
- * %rdi: ptr to current fiber, %rsi: ptr to next fiber
+ * Once we save the GPRS, the fiber we're switching
+ * away from will have a stack like this:
+ *
+ *--------------------------
+ * addr of next instruction in routine
+ * -------------------------
+ * GPR Values (%rax through %rsi)
+ * %rdi: ptr to fiber we're switching away from
+ * Remaining GPR Values (%rbp through %r15)
+ * -------------------------
+ * 
  */
+
 .section .text
 .code64
 
@@ -40,6 +60,9 @@ ENTRY(nk_fiber_context_switch)
 //    SAVE_FPRS()
     movq %rsp, 0x0(%rdi)
     movq 0x0(%rsi), %rsp
+// Could we keep track of which floating point registers need to be saved
+// using unused registers (we talked about during last meeting) and then 
+// using a bitmask to figure out which registers to save? 
 //    RESTORE_FPRS()
     FIBER_RESTORE_GPRS()
     retq
@@ -56,12 +79,6 @@ ENTRY(nk_fiber_fork)
 
 ENTRY(_nk_fiber_fork_exit)
     FIBER_RESTORE_GPRS_NOT_RAX()
-    retq
-//    SAVE_FPRS()
-    //movq 0x0(%rsi), %rax
-    //movq %rsp, 0x0(%rdi)
-    //movq 0x0(%rsi), %rsp
     //FIBER_RESTORE_GPRS()
-    //xorq %rax, %rax 
-    //retq
+    retq
 
