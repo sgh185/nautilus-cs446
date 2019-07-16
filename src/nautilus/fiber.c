@@ -440,29 +440,6 @@ void _nk_fiber_init(nk_fiber_t *f){
   return;
 }
 
-void _nk_fiber_fork_init(nk_fiber_t *f){
-  _fiber_push(f, (uint64_t) _nk_fiber_cleanup);
-  _fiber_push(f, 0);
-  _fiber_push(f, 0xdeadbeef12345671ul);
-  _fiber_push(f, 0xdeadbeef12345672ul);
-  _fiber_push(f, 0xdeadbeef12345673ul);
-  _fiber_push(f, 0xdeadbeef12345674ul);
-  _fiber_push(f, (uint64_t) f);
-  _fiber_push(f, 0xdeadbeef12345675ul);
-  _fiber_push(f, 0xdeadbeef12345676ul);
-  _fiber_push(f, 0xdeadbeef12345677ul);
-  _fiber_push(f, 0xdeadbeef12345678ul);
-  _fiber_push(f, 0xdeadbeef12345679ul);
-  _fiber_push(f, 0x0ul);
-  _fiber_push(f, 0xdeadbeef1234567bul);
-  _fiber_push(f, 0xdeadbeef1234567cul);
-  _fiber_push(f, 0xdeadbeef1234567dul);
-
-  return;
-}
-
-
-
 nk_fiber_t* _nk_fiber_current(){
   // returns the current CPU's current fiber
   nk_thread_t *curr_thread = get_cur_thread();
