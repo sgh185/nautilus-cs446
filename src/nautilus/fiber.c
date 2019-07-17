@@ -242,7 +242,7 @@ nk_fiber_t *__nk_fiber_fork(){
 
 
     // this is the address at which the fork wrapper (nk_fiber_fork) stashed
-    // the current value of rbp - this must conform to the REG_SAVE model
+    // the current value of rbp - this must conform to the GPR SAVE model
     // in fiber.h
   void *rbp_stash_addr = ret0_addr + 9*8; 
   
@@ -273,9 +273,9 @@ nk_fiber_t *__nk_fiber_fork(){
   //FIBER_INFO("__nk_fiber_fork() : new->rsp is %p\n", new->rsp); 
 
   // Update the child's snapshot of rbp on its stack (that was done
-   // by nk_thread_fork()) with the corresponding position in the child's stack
-   // when nk_thread_fork() unwinds the GPRs, it will end up with rbp pointing
-   // into the cloned stack
+   // by nk_fiber_fork()) with the corresponding position in the child's stack
+   // when nk_fiber_fork() unwinds the GPRs, it will end up with rbp pointing
+   // into the cloned stack instead of the old stack
   void **rbp_stash_ptr = (void**)(new->rsp + rbp_stash_offset_from_ret0_addr - 0x8);
   *rbp_stash_ptr = (void*)(new->rsp + rbp_offset_from_ret0_addr);
   
@@ -285,50 +285,39 @@ nk_fiber_t *__nk_fiber_fork(){
    
   //FIBER_INFO("__nk_fiber_fork() : rbp_stash_ptr: %p, rbp2_ptr: %p, ret2_ptr: %p\n", rbp_stash_ptr, rbp2_ptr, ret2_ptr);
   // rbp2 we don't care about since we will not not
-  // return from the caller in the child, but rather go into the thread cleanup
+  // return from the caller in the child, but rather go into the fiber cleanup
   *rbp2_ptr = 0x0ULL;
 
-  // fix up the return address to point to our thread cleanup function
-  // so when caller returns, the thread exists
+  // fix up the return address to point to our fiber cleanup function
+  // so when caller returns, the fiber exists
   *ret2_ptr = &_nk_fiber_cleanup;
   
-  // now we need to setup the interrupt stack etc.
-  // we provide null for thread func to indicate this is a fork
-  //new->fun = &_nk_fiber_cleanup; 
-  //_nk_fiber_fork_init(new); 
-
- 
-
   //DEBUG: Printing the fibers data
   //FIBER_INFO("nk_fiber_fork() : printing fiber data for curr fiber. ptr %p, stack ptr %p\n", curr, curr->rsp);
   //FIBER_INFO("nk_fiber_fork() : printing fiber data for new fiber. ptr %p, stack ptr %p\n", new, new->rsp); 
   //FIBER_INFO("nk_fiber_fork() : printing queues. old fiber queue %p, new queue %p\n", curr->wait_queue, new->wait_queue);  
 
-  /* Add the original fiber back to the sched queue
-  nk_thread_t *cur_thread = _get_fiber_thread();
-  struct list_head *fiber_sched_queue = &(cur_thread->f_sched_queue);
-  list_add_tail(&(curr->l_head), fiber_sched_queue);
+  // Set forked fiber's %rax to 0. Will not restore %rax when we exit fork function
+  *(uint64_t*)(new->rsp+GPR_RAX_OFFSET) = 0x0ul;
+
+  // Add the forked fiber to the sched queue
+  nk_fiber_run(new, 0); 
   
   //DEBUG: Prints Enqueued info
-  FIBER_INFO("nk_fiber_fork() : just enqueued fiber %p\n", curr);
+  //FIBER_INFO("nk_fiber_fork() : just enqueued fiber %p\n", curr);
 
-  // Switch to the new fiber
-  get_cur_thread()->curr_fiber = new;
-  nk_fiber_t *ret = nk_fiber_fork_switch(curr, new);
-  FIBER_INFO("nk_fiber_fork() : just switched to the new fiber\n");
-  */
-  *(uint64_t*)(new->rsp+GPR_RAX_OFFSET) = 0x0ul;
-  nk_fiber_run(new, 0); 
   return new;
 }
 
 void nk_fiber_join(nk_fiber_t *wait_on){
   // Check if wait_on is NULL
+  // TODO: Should we make join return an int so we can indicate early abort?
   if(!wait_on){
     return;
   }
-  // Fetchees current fiber
+  // Fetches current fiber
   nk_fiber_t *curr_fiber = _nk_fiber_current();
+  
   // DEBUG: Prints out our intent to add curr_fiber to wait_on's wait queue
   //FIBER_INFO("nk_fiber_join() : about to enqueue fiber %p on the wait queue %p\n", curr_fiber, wait_on->wait_queue);
 
