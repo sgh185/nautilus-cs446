@@ -104,7 +104,7 @@ int nk_fiber_yield_to(nk_fiber_t *f_to);
 
 // Takes a fiber, a condition to yield on, and a function to check that condition
 // returns 0 if the fiber does not yield
-int nk_fiber_conditional_yield(nk_fiber_t *fib, uint8_t (*cond_function)(void *), void *state);
+int nk_fiber_conditional_yield(nk_fiber_t *fib, uint8_t (*cond_function)(void *param), void *state);
 
 // Returns a ptr to the current fiber
 nk_fiber_t *_nk_fiber_current();
@@ -152,6 +152,7 @@ nk_thread_t* _get_fiber_thread();
 
 int _check_all_queues_remove(nk_fiber_t *to_del);
 
+int _check_queue_not_empty(struct list_head *q);
 /******** FIBER QUEUE **********/
 typedef struct fiber_queue {
     uint64_t   size;        // number of elements currently in the queue

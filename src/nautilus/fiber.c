@@ -206,7 +206,7 @@ int nk_fiber_yield_to(nk_fiber_t *f_to){
   return 0;
 }
 
-int nk_fiber_conditional_yield(nk_fiber_t *fib, uint8_t (*cond_function)(void *), void *state){
+int nk_fiber_conditional_yield(nk_fiber_t *fib, uint8_t (*cond_function)(void *param), void *state){
   if(cond_function(state)){
     nk_fiber_yield();
     return 0;
@@ -570,19 +570,19 @@ void _nk_fiber_exit(nk_fiber_t *f){
   f->is_done = 1;
 
   //TODO: PROBABLY WANT TO DO THESE ATOMICALLY (Frees and changing curr fiber)
- /* 
-  if(!(list_empty_careful(&(_get_fiber_thread()->f_sched_queue)))) {
+ 
+  /* if((_check_queue_not_empty(&(_get_fiber_thread()->f_sched_queue)))) {
     struct list_head *fiber_sched_queue = &(_get_fiber_thread()->f_sched_queue);
     nk_fiber_t *f_to = list_first_entry(fiber_sched_queue, nk_fiber_t, l_head);
     list_del_init(&(f_to->l_head));
-    get_cur_thread()->curr_fiber = idle;
+    get_cur_thread()->curr_fiber = f_to;
   } else {*/
       // Changes current fiber to the idle fiber (since we are about to switch to it)
       get_cur_thread()->curr_fiber = idle;
     
       // Removes the idle fiber from the queue
       list_del_init(&(get_cur_thread()->curr_fiber->l_head));  
-   // }
+    //}
   // Free the current fiber's memory (stack, stack ptr, and wait queue)
   free(f->stack);
   free(f->wait_queue);
@@ -665,3 +665,14 @@ int _check_all_queues_remove(nk_fiber_t *to_del){
   return 1;
 }
 
+int _check_queue_not_empty(struct list_head *q) {
+  int num = 0;
+  nk_fiber_t *fib;
+  list_for_each_entry(fib, q, l_head) {
+    num++;
+    if(num > 2){
+      return 1;
+    }
+  }
+  return 0;
+}
