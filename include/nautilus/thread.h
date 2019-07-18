@@ -182,12 +182,6 @@ struct nk_thread {
     nk_cache_part_thread_state_t /* +18 SHOULD NOT CHANGE POSITION */
              cache_part_state;   /* Always included to reserve this "slot" for asm code */
 
-    /* Fibers related fields */
-    nk_fiber_t *idle_fiber;
-    nk_fiber_t *curr_fiber;
-    fiber_queue fiber_sched_queue;
-    struct list_head f_sched_queue;
-
     nk_stack_size_t stack_size;
     unsigned long tid;
 

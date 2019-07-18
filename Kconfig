@@ -424,7 +424,22 @@ config VIRTUAL_CONSOLE_SERIAL_MIRROR_ALL
 	  which of these behaviors you want if you are executing tasks
 	  in idle loops.
 	  
-       
+    config FIBER_THREAD
+        bool "Handle fibers in a special thread"
+        default true;
+	help
+	  When enabled, each cpu has a thread that consumes fibers.
+	  The thread can run at an arbitrary aperiodic priority.
+
+    config FIBER_THREAD_PRIORITY
+       depends on FIBER_THREAD
+       int "Aperiodic priority for fiber threads"
+       default 0
+       help 
+          Priority for the fiber threads.  The default here is
+	      the quantum in ns.   By adjusting this, you can adjust
+	      how much priority fibers effectively have in the system.
+  
 	  
     config INTERRUPT_THREAD
        bool "Restrict interrupts to special real-time interrupt thread"
@@ -877,6 +892,13 @@ menu Debugging
       default n
       help
         Turn on debug prints for threads
+
+    config DEBUG_FIBERS
+      bool "Debug Fibers"
+      depends on DEBUG_PRINTS
+      default n
+      help
+        Turn on debug prints for fibers
 
     config DEBUG_WAITQUEUES
       bool "Debug Wait Queues"

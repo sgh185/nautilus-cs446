@@ -48,10 +48,10 @@ typedef struct nk_thread nk_thread_t;
 #define CPU_ANY -1
 
 /* common thread stack sizes */
-#define TSTACK_DEFAULT 0 // will be 4K
-#define TSTACK_4KB 0x001000
-#define TSTACK_1MB 0x100000
-#define TSTACK_2MB 0x200000
+#define FSTACK_DEFAULT 0 // will be 4K
+#define FSTACK_4KB 0x001000
+#define FSTACK_1MB 0x100000
+#define FSTACK_2MB 0x200000
 
 #define MAX_QUEUE (NAUT_CONFIG_MAX_THREADS)
 
@@ -120,39 +120,14 @@ void nk_fiber_set_vc(struct nk_virtual_console *vc);
 
 // TODO: condier hiding the Internal Interface from the user
 /******** INTERNAL INTERFACE **********/
+void __fiber(void *in, void **out);
+ 
 nk_fiber_t *__nk_fiber_fork();
 
 void _nk_fiber_fork_exit();
 
-void _nk_fiber_cleanup();
-
-void _fiber_push(nk_fiber_t * f, uint64_t x);
-
-void _fiber_wrapper(nk_fiber_t * f_to);
-
-void _nk_fiber_init(nk_fiber_t *f);
-
-void _nk_fiber_debug_init(nk_fiber_t *f);
-
-nk_fiber_t* _nk_fiber_current();
-
-nk_fiber_t* _nk_idle_fiber();
-
-nk_fiber_t* _rr_policy();
-
-int _nk_fiber_yield_to();
-
 void _nk_fiber_exit(nk_fiber_t *f);
 
-uint8_t _is_idle_fiber(nk_fiber_t *f);
-
-nk_thread_t *_get_random_fiber_thread();
-
-nk_thread_t* _get_fiber_thread();
-
-int _check_all_queues_remove(nk_fiber_t *to_del);
-
-int _check_queue_not_empty(struct list_head *q);
 /******** FIBER QUEUE **********/
 typedef struct fiber_queue {
     uint64_t   size;        // number of elements currently in the queue

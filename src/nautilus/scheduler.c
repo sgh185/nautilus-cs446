@@ -492,7 +492,6 @@ typedef struct nk_sched_thread_state {
     
     int      is_intr;      // this is an interrupt thread
     int      is_task;      // this is a task thread
-    int	     is_fiber;     // this is a fiber thread
 
     uint64_t start_time;   // when last started
     uint64_t cur_run_time; // how long it has run without being preempted
@@ -3959,77 +3958,6 @@ static int start_task_thread_for_this_cpu()
 
 #endif
 
-//TODO: add this to kconfig
-//#if NAUT_CONFIG_FIBER_THREAD
- 
-static void nk_fiber_idle(void *in, void **out)
-{
-  while(1){
-      //INFO("nk_fiber_idle()\n");
-      nk_fiber_yield();
-      if(list_empty_careful(&(_get_fiber_thread()->f_sched_queue))){
-        //INFO("nk_fiber_idle() : going to sleep\n");
-        nk_sleep(1000000000);
-        //INFO("nk_fiber-idle() : waking up\n");
-      }
-  }
-
-  return;
-}
-
-static void fiber(void *in, void **out)
-{
-  if (nk_thread_name(get_cur_thread(),"(fiber)")) { 
-    ERROR("Failed to name fiber thread\n");
-    return;
-  }
-
-  //TODO: Figure out if these constraints are right for fibers
-  struct nk_sched_constraints c = { .type=APERIODIC,
-            .interrupt_priority_class=0x0, 
-            .aperiodic.priority=0 }; //TODO: add kconfig
-  
-  if (nk_sched_thread_change_constraints(&c)) { 
-    ERROR("Unable to set constraints for fiber thread\n");
-    panic("Unable to set constraints for fiber thread\n");
-    return;
-  }
-
-  // TODO: Associate fiber thread to console thread (somehow) 
-  //get_cur_thread()->vc = get_cur_thread()->parent->vc;
-
-  // Promote to fiber thread
-  get_cur_thread()->sched_state->is_fiber = 1;
-  INIT_LIST_HEAD(&(get_cur_thread()->f_sched_queue));
-  
-  // Start idle fiber
-  get_cpu()->fiber_thread = get_cur_thread();
-  nk_fiber_t *idle_fiber_ptr;
-  nk_fiber_start(nk_fiber_idle, 0, 0, 0, 0, &idle_fiber_ptr);
-  get_cur_thread()->curr_fiber = idle_fiber_ptr;
-  get_cur_thread()->idle_fiber = idle_fiber_ptr;
-  idle_fiber_ptr->is_idle = true;
-  _fiber_wrapper(idle_fiber_ptr);
-
-  return;
-}
-
-static int start_fiber_thread_for_this_cpu()
-{
-  nk_thread_id_t tid;
-  //TODO: pick fiber thread stack size, size of idle fiber
-  if (nk_thread_start(fiber, 0, 0, 1, FIBER_THREAD_STACK_SIZE, &tid, my_cpu_id())) {
-      ERROR("Failed to start fiber thread\n");
-      return -1;
-  }
-
-  //INFO("Fiber thread launched on cpu %d as %p\n", my_cpu_id(), tid);
-
-  return 0;
-}
-
-//#endif
-
 static int shared_init(struct cpu *my_cpu, struct nk_sched_config *cfg)
 {
     nk_thread_t * main = NULL;
@@ -4219,6 +4147,21 @@ static int start_reaper()
 
 #endif
 
+#ifdef NAUT_CONFIG_FIBER_THREAD
+
+static int __start_fiber_thread_for_this_cpu()
+{
+  nk_thread_id_t tid;
+  //TODO: pick fiber thread stack size, size of idle fiber
+  if (nk_thread_start(__fiber, 0, 0, 1, FIBER_THREAD_STACK_SIZE, &tid, my_cpu_id())) {
+      ERROR("Failed to start fiber thread\n");
+      return -1;
+  }
+  //INFO("Fiber thread launched on cpu %d as %p\n", my_cpu_id(), tid);
+  return 0;
+}
+
+#endif
 
 void nk_sched_start()
 {
@@ -4293,14 +4236,14 @@ void nk_sched_start()
     }
 #endif	
 
-//#ifdef NAUT_CONFIG_FIBER_THREAD
-    //INFO("Starting fiber thread for CPU %d\n",my_cpu->id);
-    if (start_fiber_thread_for_this_cpu()){
+#ifdef NAUT_CONFIG_FIBER_THREAD
+    INFO("Starting fiber thread for CPU %d\n",my_cpu->id);
+    if (__start_fiber_thread_for_this_cpu()){
 	ERROR("Cannot start fiber thread for CPU!\n");
 	panic("Cannot start fiber thread for CPU!\n");
 	return;
     }
-//#endif
+#endif
 
     // this is the thread set up by the nk_sched_init/nk_sched_init_ap
     // it's the boot thread and will become the idle thread
