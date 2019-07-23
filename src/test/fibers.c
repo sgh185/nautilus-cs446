@@ -298,6 +298,35 @@ void fiber_routine3(void *i, void **o)
   nk_vc_printf("fiber_routine3() : fiber is finished, a = %d\n",  a);
 }
 
+#define N 100000
+void first_timer(void *i, void **o)
+{
+  nk_fiber_set_vc(vc);
+  int a = 0;
+  uint64_t start = 0;
+  uint64_t end = 0;
+  while(a < N){
+    if (a == 2) {
+        start = rdtsc();
+    }
+    nk_fiber_yield();
+    a++;
+  }
+  end = rdtsc();
+  nk_vc_printf("First Timer is finished, a = %d, cycle count = %d, cycles per iteration = %d\n", a, end-start, (end-start)/N);
+}
+
+void second_timer(void *i, void **o)
+{
+  nk_fiber_set_vc(vc);
+  int a = 0;
+  while(a < N){
+    nk_fiber_yield();
+    a++;
+  }
+  nk_vc_printf("Second Timer is finished, a = %d\n", a);
+}
+
 int test_fibers_counter(){
   nk_fiber_t *even;
   nk_fiber_t *odd;
@@ -399,6 +428,17 @@ int test_fiber_routine_2()
   return 0;
 }
 
+int test_fiber_timing(){
+  nk_fiber_t *first;
+  nk_fiber_t *second;
+  vc = get_cur_thread()->vc;
+  
+  nk_fiber_start(first_timer, 0, 0, 0, 1, &first);
+  nk_fiber_start(second_timer, 0, 0, 0, 1, &second);
+
+  return 0;
+}
+
 
 static int
 handle_fibers (char * buf, void * priv)
@@ -467,6 +507,13 @@ handle_fibers9 (char * buf, void * priv)
   return 0;
 }
 
+static int
+handle_fibers10 (char * buf, void * priv)
+{
+  test_fiber_timing();
+  return 0;
+}
+
 
 static struct shell_cmd_impl fibers_impl = {
   .cmd      = "fibertest",
@@ -522,6 +569,11 @@ static struct shell_cmd_impl fibers_impl9 = {
   .handler  = handle_fibers9,
 };
 
+static struct shell_cmd_impl fibers_impl10 = {
+  .cmd      = "fibertime1",
+  .help_str = "fibertime1",
+  .handler  = handle_fibers10,
+};
 
 
 nk_register_shell_cmd(fibers_impl);
@@ -533,3 +585,4 @@ nk_register_shell_cmd(fibers_impl6);
 nk_register_shell_cmd(fibers_impl7);
 nk_register_shell_cmd(fibers_impl8);
 nk_register_shell_cmd(fibers_impl9);
+nk_register_shell_cmd(fibers_impl10);
