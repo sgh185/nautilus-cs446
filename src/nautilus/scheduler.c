@@ -2998,8 +2998,8 @@ static void handle_special_switch(rt_status what, int have_lock, uint8_t flags, 
     int did_preempt_disable = 0;
     int no_switch=0;
 
-    if (!preempt_is_disabled()) { // ENRICO: avoid to be interrupted during context switch
-	preempt_disable();
+    if (!preempt_is_disabled()) {
+    preempt_disable();
 	did_preempt_disable = 1;
     }
 
@@ -3031,7 +3031,7 @@ static void handle_special_switch(rt_status what, int have_lock, uint8_t flags, 
     c->sched_state->status = what;
 
     // force a rescheduling pass even though preemption is off
-    n = _sched_need_resched(have_lock,1); // ENRICO: for fibers, get the next fiber from the queue
+    n = _sched_need_resched(have_lock,1); 
 
     // at this point, the scheduler has been updated and so we can
     // invoke the release callback
@@ -3097,8 +3097,8 @@ static void handle_special_switch(rt_status what, int have_lock, uint8_t flags, 
     // our context will indicate interrupts off
     // when we switch away, we will leave rflags.if=0 on
     // the stack and preemption enabled
-    nk_thread_switch(n); // ENRICO: actual context switch, this function will return when the other thread we are context switching to will yield
-    
+    nk_thread_switch(n);
+
     DEBUG("After return from switch (back in %llu \"%s\")\n", c->tid, c->name);
 
  out_good:
@@ -4147,22 +4147,6 @@ static int start_reaper()
 
 #endif
 
-#ifdef NAUT_CONFIG_FIBER_THREAD
-
-static int __start_fiber_thread_for_this_cpu()
-{
-  nk_thread_id_t tid;
-  //TODO: pick fiber thread stack size, size of idle fiber
-  if (nk_thread_start(__fiber, 0, 0, 1, FIBER_THREAD_STACK_SIZE, &tid, my_cpu_id())) {
-      ERROR("Failed to start fiber thread\n");
-      return -1;
-  }
-  //INFO("Fiber thread launched on cpu %d as %p\n", my_cpu_id(), tid);
-  return 0;
-}
-
-#endif
-
 void nk_sched_start()
 {
     uint64_t num_cpus = nk_get_num_cpus();
@@ -4235,15 +4219,6 @@ void nk_sched_start()
 	return;
     }
 #endif	
-
-#ifdef NAUT_CONFIG_FIBER_THREAD
-    INFO("Starting fiber thread for CPU %d\n",my_cpu->id);
-    if (__start_fiber_thread_for_this_cpu()){
-	ERROR("Cannot start fiber thread for CPU!\n");
-	panic("Cannot start fiber thread for CPU!\n");
-	return;
-    }
-#endif
 
     // this is the thread set up by the nk_sched_init/nk_sched_init_ap
     // it's the boot thread and will become the idle thread

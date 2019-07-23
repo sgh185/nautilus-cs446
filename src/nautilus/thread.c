@@ -59,7 +59,7 @@ static unsigned long next_tid = 0;
 
 extern addr_t boot_stack_start;
 extern void nk_thread_switch(nk_thread_t*);
-extern void nk_thread_entry(void *); // ENRICO: commom entry point for all threads
+extern void nk_thread_entry(void *); 
 static struct nk_tls tls_keys[TLS_MAX_KEYS];
 
 
@@ -249,12 +249,11 @@ thread_setup_init_stack (nk_thread_t * t, nk_thread_fun_t fun, void * arg)
         thread_push(t, (uint64_t)fun);
     }
 
-    // ENRICO: sort of make it look like we context switched away from this (we create it in a "suspended state")
     thread_push(t, (uint64_t)KERNEL_SS);                 // SS
     thread_push(t, (uint64_t)(t->rsp+RSP_STACK_OFFSET)); // rsp
     thread_push(t, (uint64_t)0UL);                       // rflags
     thread_push(t, (uint64_t)KERNEL_CS);
-    thread_push(t, (uint64_t)&nk_thread_entry); // ENRICO: push the return address
+    thread_push(t, (uint64_t)&nk_thread_entry);
     thread_push(t, 0);                                   // dummy error code
     thread_push(t, 0);                                   // intr no
 
@@ -274,7 +273,7 @@ thread_setup_init_stack (nk_thread_t * t, nk_thread_fun_t fun, void * arg)
         *(uint64_t*)(t->rsp-GPR_RAX_OFFSET) = 0;
     }
 
-    t->rsp -= GPR_SAVE_SIZE;                             // account for the GPRS; // ENRICO: set the stack pointer
+    t->rsp -= GPR_SAVE_SIZE;                             // account for the GPRS;
 }
 
 
@@ -765,9 +764,6 @@ nk_join (nk_thread_id_t t, void ** retval)
     return 0;
 }
     
-
-
-
 
 /* 
  * nk_join_all_children

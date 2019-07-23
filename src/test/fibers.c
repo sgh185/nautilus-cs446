@@ -246,7 +246,8 @@ void fiber_fork_join(void *i, void **o)
     nk_fiber_join(f_new);
   }
 
-  nk_fiber_t *f_curr = _nk_fiber_current();
+  //nk_fiber_t *f_curr = _nk_fiber_current();
+  nk_fiber_t *f_curr = NULL;
   while(a < 5){
     nk_vc_printf("fiber_fork_join() : This is the %d iteration of fiber %p\n", a++, f_curr);
     nk_fiber_yield();
@@ -257,7 +258,8 @@ void fiber_fork_join(void *i, void **o)
 void fiber_routine2(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
-  nk_vc_printf("fiber_routine2() : Fiber %p created\n", _nk_fiber_current());
+  //nk_vc_printf("fiber_routine2() : Fiber %p created\n", _nk_fiber_current());
+  nk_vc_printf("fiber_routine2() : Fiber created\n");
 }
 
 
@@ -268,7 +270,8 @@ void fiber_routine1(void *i, void **o)
   nk_fiber_t *f_new;
   while(a < 5){
     f_new = nk_fiber_fork();
-    nk_fiber_t *curr = _nk_fiber_current();
+    //nk_fiber_t *curr = _nk_fiber_current();
+    nk_fiber_t *curr = NULL;
     if(f_new){
       nk_fiber_t *new;
       nk_fiber_start(fiber_routine2, 0, 0, 0, 0, &new);
@@ -276,7 +279,8 @@ void fiber_routine1(void *i, void **o)
     }
     nk_vc_printf("fiber_routine1() : This is the %d iteration of fiber %p\n", a++, curr);
   }
-  nk_vc_printf("fiber_routine1() : fiber %p is finished, a = %d\n", _nk_fiber_current(), a);
+  //nk_vc_printf("fiber_routine1() : fiber %p is finished, a = %d\n", _nk_fiber_current(), a);
+  nk_vc_printf("fiber_routine1() : fiber is finished, a = %d\n", a);
 }
 
 void fiber_routine3(void *i, void **o)
@@ -286,10 +290,12 @@ void fiber_routine3(void *i, void **o)
   nk_fiber_t *f_new;
   while(a < 5){
     f_new = nk_fiber_fork();
-    nk_fiber_t *curr = _nk_fiber_current();
+    //nk_fiber_t *curr = _nk_fiber_current();
+    nk_fiber_t *curr = NULL;
     nk_vc_printf("fiber_routine3() : This is the %d iteration of fiber %p\n", a++, curr);
   }
-  nk_vc_printf("fiber_routine3() : fiber %p is finished, a = %d\n", _nk_fiber_current(), a);
+  //nk_vc_printf("fiber_routine3() : fiber %p is finished, a = %d\n", _nk_fiber_current(), a);
+  nk_vc_printf("fiber_routine3() : fiber is finished, a = %d\n",  a);
 }
 
 int test_fibers_counter(){

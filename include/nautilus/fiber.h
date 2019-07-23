@@ -37,9 +37,6 @@ extern "C" {
 #include <nautilus/spinlock.h>
 #include <nautilus/intrinsics.h>
 
-// Always included so we get the necessary type
-#include <nautilus/cachepart.h>
-
 #include <nautilus/scheduler.h>
 #include <nautilus/thread.h>
 
@@ -53,28 +50,51 @@ typedef struct nk_thread nk_thread_t;
 #define FSTACK_1MB 0x100000
 #define FSTACK_2MB 0x200000
 
-#define MAX_QUEUE (NAUT_CONFIG_MAX_THREADS)
 
 /******** EXTERNAL INTERFACE **********/
 
 typedef void (*nk_fiber_fun_t)(void *input, void **output);
+
+typedef enum {  INIT,               // Being initialized
+           READY,               // Ready to be run, on a wait queue
+	       YIELD,           // in process of yielding
+           WAIT,           // being removed from fiber queue
+                               // probably due to having been put into a wait queue
+	       EXIT,            // being removed from RT and non-RT run/arrival queues
+                                   // will not return
+           RUN             // currently running routine (not on a fiber queue)
+             } nk_fiber_status;
+
 
 
 typedef struct nk_fiber {
   uint64_t rsp;                /* +0  SHOULD NOT CHANGE POSITION */
   void *stack;                 /* +8  SHOULD NOT CHANGE POSITION */
   uint16_t fpu_state_offset;   /* +16 SHOULD NOT CHANGE POSITION */
-  nk_cache_part_thread_state_t /* +18 SHOULD NOT CHANGE POSITION */
-      cache_part_state;        /* Always included to reserve this "slot" for asm code */
+  
   nk_stack_size_t stack_size;
   unsigned long fid; /* Fiber ID, may not be needed? */
-
+    
+  spinlock_t lock; /* allows us to lock the fiber */
+  nk_fiber_status f_status;
+  
+  // TODO MAC: need to figure out screen/keyboard I/O
   struct nk_virtual_console *vc; // for printing
   int is_idle; // indicates whether this is the idle fiber
 
-  struct fiber_queue *wait_queue; // wait queue for fibers waiting on this thread
-  int num_wait;           // how many wait queues this thread is currently on
-  struct list_head l_head; // sched queue node
+  // PAD: there can be many more fibers than threads
+  // Also, you can embed this without a pointer if you use the fixed size
+  // just define fiber_queue earlier.
+  // also - these are fibers waiting on this fiber, right?
+  // Do you also want to track the fibers children, like threads do?   
+
+  struct list_head wait_queue; // wait queue for fibers waiting on this fiber
+  struct list_head wait_node;
+  int num_wait;             // number of fibers on this fiber's wait queue
+
+  
+  // TODO MAC: Rename l_head and change name everywhere in code
+  struct list_head sched_node; // sched queue node
   
   nk_fiber_fun_t fun; // routine the fiber will execute
   void *input;  // input for the fiber's routine
@@ -83,12 +103,11 @@ typedef struct nk_fiber {
   uint8_t is_done; //indicates whether the fiber is done (for reaping?)
 } nk_fiber_t;
 
+// TODO MAC: Reformat to make function header span multiple lines
 // Create a fiber but do not launch it
 int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, nk_fiber_t **fiber_output);
 
-// Initialize fiber stack
-void _nk_fiber_init(nk_fiber_t *f);
-
+// TODO MAC: Have this take CPU instead of flag (-1 is any CPU, otherwise choose specific CPU)
 // Launch a previously created fiber
 int nk_fiber_run(nk_fiber_t *f, uint8_t random_cpu_flag);
 
@@ -106,9 +125,6 @@ int nk_fiber_yield_to(nk_fiber_t *f_to);
 // returns 0 if the fiber does not yield
 int nk_fiber_conditional_yield(nk_fiber_t *fib, uint8_t (*cond_function)(void *param), void *state);
 
-// Returns a ptr to the current fiber
-nk_fiber_t *_nk_fiber_current();
-
 // returns a copy of the currently running fiber with a new FID
 nk_fiber_t *nk_fiber_fork();
 
@@ -118,23 +134,28 @@ void nk_fiber_join(nk_fiber_t *wait_on);
 // Set virtual console
 void nk_fiber_set_vc(struct nk_virtual_console *vc);
 
-// TODO: condier hiding the Internal Interface from the user
+int nk_fiber_init();
+
+int nk_fiber_init_ap();
+
+// TODO: consider hiding the Internal Interface from the user 
 /******** INTERNAL INTERFACE **********/
-void __fiber(void *in, void **out);
- 
-nk_fiber_t *__nk_fiber_fork();
+void __fiber_thread(void *in, void **out);
 
-void _nk_fiber_fork_exit();
+void nk_fiber_startup();
 
-void _nk_fiber_exit(nk_fiber_t *f);
-
+// TODO MAC: Change name to nk_fiber_queue 
 /******** FIBER QUEUE **********/
+/*
 typedef struct fiber_queue {
+    // TODO MAC: Add lock to fiber queue
     uint64_t   size;        // number of elements currently in the queue
     uint64_t   head;        // index of newest element 
     uint64_t   tail;        // index of oldest element
     nk_fiber_t *fibers[MAX_QUEUE];
 } fiber_queue ;
+
+// TODO MAC: Move all fiber queue stuff to fiber.c, transition to list queue
 
 static void fiber_queue_init(fiber_queue *queue);
 static int        fiber_queue_enqueue(fiber_queue *queue, nk_fiber_t *fiber);
@@ -209,7 +230,7 @@ static int fiber_queue_empty(fiber_queue *queue)
   return queue->size==0;
 }
 
-/*
+
 static void       fiber_queue_dump(fiber_queue *queue, char *pre);
 static void fiber_queue_dump(fiber_queue *queue, char *pre)
 {
