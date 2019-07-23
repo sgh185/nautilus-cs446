@@ -103,6 +103,9 @@ typedef struct nk_fiber {
   uint8_t is_done; //indicates whether the fiber is done (for reaping?)
 } nk_fiber_t;
 
+// Returns the fiber that is currently running
+nk_fiber_t *nk_fiber_current();
+
 // TODO MAC: Reformat to make function header span multiple lines
 // Create a fiber but do not launch it
 int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, nk_fiber_t **fiber_output);
@@ -129,7 +132,7 @@ int nk_fiber_conditional_yield(nk_fiber_t *fib, uint8_t (*cond_function)(void *p
 nk_fiber_t *nk_fiber_fork();
 
 // Causes the currently running fiber to wait on the specified fiber 
-void nk_fiber_join(nk_fiber_t *wait_on);
+int nk_fiber_join(nk_fiber_t *wait_on);
 
 // Set virtual console
 void nk_fiber_set_vc(struct nk_virtual_console *vc);
@@ -137,10 +140,6 @@ void nk_fiber_set_vc(struct nk_virtual_console *vc);
 int nk_fiber_init();
 
 int nk_fiber_init_ap();
-
-// TODO: consider hiding the Internal Interface from the user 
-/******** INTERNAL INTERFACE **********/
-void __fiber_thread(void *in, void **out);
 
 void nk_fiber_startup();
 

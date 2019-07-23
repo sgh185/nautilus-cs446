@@ -75,7 +75,6 @@
 
 // task and idle threads run tasks, and so their stacks
 // need to be sized to be sensible for those tasks
-#define FIBER_THREAD_STACK_SIZE (PAGE_SIZE_2MB)
 #define TASK_THREAD_STACK_SIZE (PAGE_SIZE_2MB)
 #define IDLE_THREAD_STACK_SIZE (PAGE_SIZE_2MB)
 
