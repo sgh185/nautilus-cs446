@@ -578,7 +578,7 @@ void nk_fiber_startup()
     }
 }
 
-#if NAUT_CONFIG_FIBER_DEBUG
+#if NAUT_CONFIG_DEBUG_FIBERS
 void _debug_yield(nk_fiber_t *f_to)
 {
   if (f_to) {
@@ -594,7 +594,7 @@ void _debug_yield(nk_fiber_t *f_to)
     //DEBUG: Will indicate when fiber queue is done printing (to indicate whether queue is finite)
     FIBER_DEBUG("nk_fiber_yield() : Done printing out the fiber queue.\n");
   }
-
+}
 #endif
 
 /******** EXTERNAL INTERFACE **********/
@@ -705,7 +705,7 @@ int nk_fiber_yield()
   nk_fiber_t *f_to = _rr_policy();
 
   // TODO MAC: Move into separate function for debugging 
-  #ifdef NAUT_CONFIG_DEBUG_FIBERS
+  #if NAUT_CONFIG_DEBUG_FIBERS
   _debug_yield(f_to);
   #endif
 
