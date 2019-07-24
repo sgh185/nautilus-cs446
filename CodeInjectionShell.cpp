@@ -10,38 +10,19 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
-#include "llvm/Analysis/CallGraph.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 
 #include <vector>
+#include <map>
 
 using namespace llvm;
 using namespace std;
 
+// Testing
 #define DEBUG 1
-
-#define MARKER "p6pbbUlpLo0BL1bM2k8K"
 #define YIELD_CALL "nk_fiber_yield"
 
-/* *** Basic pass to insert the "nk_fiber_yield" function call every 50 lines of code. *** 
- * 
- * Technical issues:
- * - [PARTIALLY SOLVED] Injecting function that doesn't exist in current module (i.e. yield)
- *   Ideas --- getOrCreateFunction will create a shell, stil could have an empty body (THIS SOLUTION CHOSEN)
- *         --- add necessary files in addition to the -CIY flag upon compilation (Simone's solution?)
- *         --- write a function that extracts nk_fiber_yield from some Nautilus source file and keeps it in this module
- * 
- * - [SOLVED] Pass is invoked repeatedly since bitcode is modified each time code injections occur
- *   Ideas --- End pass invocation after certain number of injections are introduced
- *         --- Complete one pass invocation ONLY, prevent reinvocation of pass by introducing a marker function,
- *             pass will terminate upon finding the marker function (THIS SOLUTION CHOSEN)
- * 
- * Conceptual issues:
- * - Injecting yield calls is not smart in all occurrences (e.g. critical sections, presence of locks, etc.)
- * 
- */
-
-Function *MARKER_FUNC = NULL; // A dummy function --- if this function exists, terminate the pass (will occur after one invocation)
+Function *YIELD = NULL;
 
 namespace
 {
@@ -49,13 +30,19 @@ namespace
 // Useful to print out information later.
 struct debugInfo
 {
-    // Simple stats right now
-
     // Code injection info:
     int64_t totalLines;
     int64_t totalInjections;
-    bool marker_exists = false;
-    // int64_t failedInjections // May not need
+    vector<Instruction *> InjectionLocations;
+
+    // Inline information
+    int64_t totalInlines;
+    map<CallInst *, string> failedInlines;
+    int64_t numFailedInlines;
+
+    // Info on INITIAL yield calls in module --- print if necessary
+    vector<CallInst *> InitCallsToYield;
+    int64_t initNumCallsToYield;
 };
 
 struct CAT : public ModulePass
@@ -67,31 +54,20 @@ struct CAT : public ModulePass
 
     bool doInitialization(Module &M) override
     {
-        // Look for the marker name, set the global marker function var if it exists
-        auto marker = M.getFunction(MARKER);
-        if (marker != NULL)
-            MARKER_FUNC = marker;
+        // Granted all modules are linked, "nk_fiber_yield" will be found, set YIELD accordingly
+        auto yield = M.getFunction(YIELD_CALL);
+        if (yield != NULL)
+            YIELD = yield;
 
         return false;
     }
 
     bool runOnModule(Module &M) override
     {
-        // If the marker function exists, terminate pass
-        if (MARKER_FUNC != NULL)
+        if (!YIELD)
             return false;
 
-        // Declare yield in the module first
-        LLVMContext &Context = M.getContext();
-        IRBuilder<> builder(Context);
-        FunctionType *FT_int = FunctionType::get(builder.getInt32Ty(), false);
-        Function *yield_func = Function::Create(FT_int, Function::ExternalLinkage, YIELD_CALL, M);
-
-        // If nk_fiber_yield is not declared properly, terminate pass
-        // ---- FIX ---- (more appropriate way to track function declaration)
-        if (yield_func->getName() != YIELD_CALL)
-            return false;
-
+#if DEBUG
         // To print later
         DI = new debugInfo();
 
@@ -100,68 +76,79 @@ struct CAT : public ModulePass
         for (auto &F : M)
         {
             for (auto &B : F)
+            {
                 lines += B.size();
+
+                for (auto &I : B)
+                {
+                    if (auto *call = dyn_cast<CallInst>(&I))
+                    {
+                        Function *callee = call->getCalledFunction();
+                        if (callee == YIELD)
+                            DI->InitCallsToYield.push_back(call);
+                    }
+                }
+            }
         }
         DI->totalLines = lines;
+#endif
 
-        // Declare marker function
-        FunctionType *FT_void = FunctionType::get(builder.getVoidTy(), false);
-        Function *marker_func = Function::Create(FT_void, Function::ExternalLinkage, MARKER, M);
-
-        if (marker_func->getName() == MARKER)
-            DI->marker_exists = true;
-
-        /*
-        ANALYZING --- analye the module, highlight blocks where injecting a yield may not be a good idea
-        TODO: analyzeModule(DI, M);
-
-        INLINING --- optional at the moment
-        CallGraph &CG = getAnalysis<CallGraphWrapperPass>().getCallGraph();
-
-        for (auto &F : M)
-        {
-            if (F.empty())
-                continue;
-            inlineF(F, CG);
-        }
-        */
+        // ANALYZING --- analyze the module, highlight blocks where injecting a yield may not be a good idea:
+        //           --- highlight and ignore tight loops, unroll loops if possible, etc.
+        // TODO: analyzeModule(DI, M);
 
         // INJECTING --- insert function call
-        injectYield(DI, M, yield_func);
+        injectYield(DI, M, YIELD);
+
+        // INLINING --- optional at the moment (possible with flags)
+        for (auto &F : M)
+        {
+            // Ignore bitcode level debugging/LLVM internals
+            if (F.isIntrinsic())
+                continue;
+
+            if (F.empty())
+                continue;
+
+            // Inline nk_fiber_yield
+            if (&F == YIELD)
+                inlineF(F);
+        }
 
         // Cleanup
-#if DEBUG == 1
+#if DEBUG
         printDebugInfo(DI);
-#endif
         free(DI);
+        // M.print(errs(), nullptr);
+#endif
 
         return false;
     }
-
-    /*
-    bool onFunction(Function &F) 
-    {
-        return false;
-    }
-    */
 
     void injectYield(debugInfo *DI, Module &M, Function *funcToInsert)
     {
         int64_t count = 0;
         vector<Instruction *> InstructionsToInject;
 
-        // Mark locations to inject
+        // Mark locations to inject --- currently every 3 lines
         for (auto &F : M)
         {
+            // Don't inject in bitcode level debugging/LLVM internals/inside nk_fiber_yield
+            if (F.isIntrinsic() || &F == YIELD)
+                continue;
+
             for (auto &B : F)
             {
                 for (auto &I : B)
                 {
+                    if (isa<PHINode>(&I)) // Can't inject in PHINode block, breaks LLVM invariant
+                        continue;
+
                     count++;
-                    if (count == 3)
+                    if (count == 50) // Naive implementation injects every 50 lines
                     {
-#if DEBUG == 1
-                        errs() << "\nCurrrent instruction push_back: ";
+#if DEBUG
+                        errs() << "\nCurrrent instruction to push back: ";
                         I.print(errs());
                         errs() << "\n";
 #endif
@@ -172,79 +159,102 @@ struct CAT : public ModulePass
             }
         }
 
+#if DEBUG
+        DI->InjectionLocations = InstructionsToInject;
+#endif
+
         // Build CallInst to yield, insert into module
+
         for (auto i : InstructionsToInject)
         {
-#if DEBUG == 1
+#if DEBUG
             errs() << "\n\nCurrent instruction from InstructionsToInject: ";
             i->print(errs());
             errs() << "\n";
 #endif
-
-            // inject yield call
+            // Inject yield call
             IRBuilder<> builder{i};
             CallInst *yieldCall = builder.CreateCall(funcToInsert, None);
+            yieldCall->setDebugLoc(i->getDebugLoc()); // ACTUAL fix for lost dbg info when inlineF is executed
 
-#if DEBUG == 1
+#if DEBUG
             errs() << "yieldCall CallInst: ";
             yieldCall->print(errs());
             errs() << "\n";
+
+            //Sanity check
             Function *callee = yieldCall->getCalledFunction();
-            if (callee->getName() == YIELD_CALL)
+            if (callee == funcToInsert)
                 errs() << "yieldCall function matches nk_fiber_yield\n";
-#endif
 
             DI->totalInjections++; // debugging info
+#endif
         }
 
         return;
     }
 
-    void inlineF(Function &F, CallGraph &CG)
+    void inlineF(Function &F)
     {
-        // Naive inlining --- by instruction count
+        vector<CallInst *> CIToIterate;
+        InlineFunctionInfo IFI;
 
-        bool modified = false;
-        CallGraphNode *n = CG[&F];
+#if DEBUG
+        errs() << "Function: " << F.getName() << "\n";
+        F.print(errs());
+        errs() << "\n";
+#endif
 
-        // Limit growth of function
-        auto base_count = 0;
-        for (auto &B : F)
-            base_count += B.size();
-
-        if (base_count > 50)
-            return;
-
-        for (auto callee : *n)
+        for (auto &use : F.uses())
         {
-            auto callInst = callee.first;
-            auto callNode = callee.second;
+            User *user = use.getUser();
 
-            if (!callInst)
-                continue;
+#if DEBUG
+            errs() << "Current User: ";
+            user->print(errs());
+            errs() << "\n";
+#endif
 
-            if (auto *call = dyn_cast<CallInst>(callInst))
+            if (auto *call = dyn_cast<CallInst>(user))
             {
-                // Limit inlining by instructions
-                auto in_count = 0;
-                for (auto &B : *call->getCalledFunction())
-                    in_count += B.size();
-
-                if (callNode->getNumReferences() > 3 && in_count > 100)
-                    continue;
-
-                InlineFunctionInfo IFI;
-                if (InlineFunction(call, IFI))
-                {
-                    modified = true;
-                    break;
-                }
+#if DEBUG
+                errs() << "Call to push back: \n";
+                call->print(errs());
+#endif
+                CIToIterate.push_back(call);
             }
         }
 
-        if (modified)
-            inlineF(F, CG);
+        for (auto CI : CIToIterate)
+        {
+#if DEBUG
+            errs() << "Current CI: ";
+            CI->print(errs());
+            errs() << "\n";
+#endif
 
+            auto inlined = InlineFunction(CI, IFI);
+            if (!inlined)
+            {
+#if DEBUG
+
+                errs() << "Didn't inline --- failed at the following CI: \n";
+                CI->print(errs());
+                errs() << "\n";
+                errs() << "INLINED failure message is: " << inlined.message << "\n";
+                DI->failedInlines[CI] = inlined.message;
+                DI->numFailedInlines++;
+#endif
+                abort();
+            }
+#if DEBUG
+            else
+            {
+                DI->totalInlines++;
+                errs() << "**** Successful Inline ****\n";
+            }
+#endif
+        }
         return;
     }
 
@@ -253,20 +263,41 @@ struct CAT : public ModulePass
         errs() << "\n\n\nDEBUGGING INFO\n";
         errs() << "Total Lines: " << DI->totalLines << "\n";
         errs() << "Total Injections: " << DI->totalInjections << "\n";
-        errs() << "Marker Exists: " << DI->marker_exists << "\n";
+        for (auto IL : DI->InjectionLocations)
+        {
+            errs() << "Injection Location: ";
+            IL->print(errs());
+            errs() << "\n";
+        }
+
+        errs() << "Total Inlines: " << DI->totalInlines << "\n";
+        errs() << "Total Failed Inlines: " << DI->numFailedInlines << "\n";
+
+        DI->initNumCallsToYield = DI->InitCallsToYield.size();
+        errs() << "Initial Number of Calls To Yield: " << DI->initNumCallsToYield << "\n";
+
+        if (DI->totalInlines == 0)
+        {
+            errs() << "All initial calls to yield:\n";
+            for (auto call : DI->InitCallsToYield)
+            {
+                errs() << "Call: ";
+                call->print(errs());
+                errs() << "\n";
+            }
+        }
         return;
     }
 
     void getAnalysisUsage(AnalysisUsage &AU) const override
     {
-        AU.addRequired<CallGraphWrapperPass>();
         return;
     }
-};
+}; // namespace
 } // namespace
 
 char CAT::ID = 0;
-static RegisterPass<CAT> X("CIY", "Shell for code injection --- yields");
+static RegisterPass<CAT> X("CAT", "Shell for code injection --- yields");
 
 static CAT *_PassMaker = NULL;
 static RegisterStandardPasses _RegPass1(PassManagerBuilder::EP_OptimizerLast,
