@@ -26,3 +26,7 @@ Conceptual issues:
   injecting calls inside deep loops
 - [SOLVED] Inlining is necessary post linking ; Inlining via code may not be necessary, pass in flag "analyzer-config ipa=dynamic"
 - What should be classified as a tight loop? (Potentially technical issue, likely answered in prior compilers research)
+
+########
+
+inject script: used to install pass, link modules, build nautilus after invoking the pass. CAT-c build (Simone) is necessary in order to build nautilus with the pass.
