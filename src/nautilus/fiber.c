@@ -701,6 +701,9 @@ int nk_fiber_start(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size
 // TODO MAC: check if we're running in the fiber thread before we allow yield to take place
 int nk_fiber_yield()
 {
+  if (_get_fiber_state()->fiber_thread != get_cur_thread()) {
+    return 1;
+  }
   // Pick a random fiber to yield to (NULL if no fiber in queue)
   nk_fiber_t *f_to = _rr_policy();
 
