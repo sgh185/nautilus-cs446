@@ -1,26 +1,28 @@
-Basic pass to insert the "nk_fiber_yield" function call every 50 lines of code. *** 
+Basic pass to insert and inline the "nk_fiber_yield" function call every 50 lines of code. *** 
 
 Technical issues:
-- [PARTIALLY SOLVED] Injecting function that doesn't exist in current module (i.e. yield)
-  Ideas --- link modules correctly (llvm-dis, etc.) after bitcode is generated, etc. (CORRECT SOLUTION)
-        --- getOrCreateFunction will create a shell, stil could have an empty body (THIS SOLUTION CHOSEN --- for dummy code)
-        --- add necessary files in addition to the -CIY flag upon compilation (Simone's solution?)
-        --- write a function that extracts nk_fiber_yield from some Nautilus source file and keeps it in this module
+- [SOLVED]  Injecting function that doesn't exist in current module (i.e. yield)
+  Ideas --- link modules correctly (llvm-link, etc.) after bitcode is generated, etc. (CORRECT SOLUTION)
+        --- getOrCreateFunction will create a shell, stil could have an empty body (scrapped --- for dummy code)
+        --- add necessary files in addition to the -CIY flag upon compilation (scrapped --- Simone's solution?)
+        --- write a function that extracts nk_fiber_yield from some Nautilus source file and keeps it in this module (llvm-link solves this issue)
 
 - [SOLVED] Pass is invoked repeatedly since bitcode is modified each time code injections occur
   Ideas --- End pass invocation after certain number of injections are introduced
         --- Complete one pass invocation ONLY, prevent reinvocation of pass by introducing a marker function,
-            pass will terminate upon finding the marker function (THIS SOLUTION CHOSEN)
+            pass will terminate upon finding the marker function
+	--- Just edit the damn script (THIS SOLUTION CHOSEN)
 
-- Marker function deemed unnecessary (Simone), marker function signature can be utilized by other code (conceptually
+- [SOLVED] Marker function removed
+  Marker function deemed unnecessary (Simone), marker function signature can be utilized by other code (conceptually
   speaking), shell for function can fail if there is no body (this pass will not include a body --- expensive)
   Ideas --- remove marker function entirely, prevent reinvocation of pass by changing the makefile (CORRECT SOLUTION)
 
-- NOTE: Function::Create() with no body is dangerous
+- [SOLVED] --- Linked modules allows LLVM to find the function with M.getFunction() ; NOTE: Function::Create() with no body is dangerous
 
 Conceptual issues:
 - Injecting yield calls is not smart in all occurrences (e.g. critical sections, presence of locks, etc.), smarter
   to inject in programmer-written routines, IGNORE at context switching/register saving functions in fiber.c, IGNORE
   injecting calls inside deep loops
-- Inlining via code may not be necessary, pass in flag "analyzer-config ipa=dynamic"
+- [SOLVED] Inlining is necessary post linking ; Inlining via code may not be necessary, pass in flag "analyzer-config ipa=dynamic"
 - What should be classified as a tight loop? (Potentially technical issue, likely answered in prior compilers research)
