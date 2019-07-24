@@ -20,6 +20,8 @@ Technical issues:
 
 - [SOLVED] --- Linked modules allows LLVM to find the function with M.getFunction() ; NOTE: Function::Create() with no body is dangerous
 
+- [SOLVED] --- -fgnu89-inline was possibly inlining nk_fiber_yield for this version of nautilus (not sure why), so injecting without calls to nk_fiber_yield or the function body were not present in runOnModule(), fixed by setting attribute in doInitialization to Attribute::NoInline  ;   LLVM::Module::getFunction() fails to recognize nk_fiber_yield in latest commit to Nautilus (mikedev, 7/24/19), with no memory corruption or leaked pointers.
+
 Conceptual issues:
 - Injecting yield calls is not smart in all occurrences (e.g. critical sections, presence of locks, etc.), smarter
   to inject in programmer-written routines, IGNORE at context switching/register saving functions in fiber.c, IGNORE

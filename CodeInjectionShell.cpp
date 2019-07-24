@@ -19,10 +19,10 @@ using namespace llvm;
 using namespace std;
 
 // Testing
-#define DEBUG 1
+#define DEBUG 0
 #define YIELD_CALL "nk_fiber_yield"
 
-Function *YIELD = NULL;
+// Function *YIELD = NULL;
 
 namespace
 {
@@ -49,6 +49,7 @@ struct CAT : public ModulePass
 {
     static char ID;
     debugInfo *DI;
+    Function *YIELD = nullptr;
 
     CAT() : ModulePass(ID) {}
 
@@ -56,17 +57,31 @@ struct CAT : public ModulePass
     {
         // Granted all modules are linked, "nk_fiber_yield" will be found, set YIELD accordingly
         auto yield = M.getFunction(YIELD_CALL);
-        if (yield != NULL)
+        errs() << "IN INIT\n";
+	// yield->print(errs());
+	if (yield != NULL)
             YIELD = yield;
 
-        return false;
+	// YIELD->print(errs());
+        errs() << "DO INIT\n";
+	errs() << &M << "\n ";
+	errs() << YIELD;
+	
+	YIELD->addFnAttr(Attribute::NoInline);
+	return false;
     }
 
     bool runOnModule(Module &M) override
     {
-        if (!YIELD)
+	YIELD = M.getFunction(YIELD_CALL);
+        if (YIELD == nullptr)
             return false;
 
+	errs() << "SOMETHING\n" << YIELD;
+	errs() << "\n " << &M;
+	
+        errs() << "YIELD: " << YIELD->getName();
+        YIELD->print(errs());
 #if DEBUG
         // To print later
         DI = new debugInfo();
@@ -306,4 +321,5 @@ static RegisterStandardPasses _RegPass1(PassManagerBuilder::EP_OptimizerLast,
 static RegisterStandardPasses _RegPass2(PassManagerBuilder::EP_EnabledOnOptLevel0,
                                         [](const PassManagerBuilder &, legacy::PassManagerBase &PM) {
         if(!_PassMaker){ PM.add(_PassMaker = new CAT()); } });
+
 
