@@ -106,9 +106,12 @@ struct CAT : public ModulePass
         DI->totalLines = lines;
 #endif
 
-        // ANALYZING --- analyze the module, highlight blocks where injecting a yield may not be a good idea:
-        //           --- highlight and ignore tight loops, unroll loops if possible, etc.
-        // TODO: analyzeModule(DI, M);
+        /*
+        ANALYZING --- analyze the module, highlight blocks where injecting a yield may not be a good idea:
+                  --- highlight and ignore tight loops, unroll loops if possible, etc.
+
+        TODO: analyzeModule(DI, M);
+        */
 
         // IDENTIFY ROUTINES
         set<Function *> FiberRoutines = identifyRoutines(DI, M, CREATE);
@@ -121,21 +124,12 @@ struct CAT : public ModulePass
         // INJECTING --- insert function call (only inside fiber routines)
         injectYield(DI, M, YIELD, FiberRoutines);
 
-        // INLINING --- optional at the moment (possible with flags)
-        for (auto &F : M)
-        {
-            // Ignore bitcode level debugging/LLVM internals
-            if (F.isIntrinsic())
-                continue;
+        // INLINING --- inline the wrapper_nk_fiber_yield, inline all routines
+        inlineF(&YIELD);        
+        for (auto routine : FiberRoutines)
+            inlineF(routine);
 
-            if (F.empty())
-                continue;
-
-            // Inline wrapper_nk_fiber_yield
-            if (&F == YIELD)
-                inlineF(F);
-        }
-
+        
         // Cleanup
 #if DEBUG
         printDebugInfo(DI);
@@ -145,6 +139,15 @@ struct CAT : public ModulePass
 
         return false;
     }
+
+    /*
+     * identifyRoutines
+     * 
+     * Iterates over all call instructions. For every CallInst that calls nk_fiber_create, 
+     * fetch the first argument of that call (which will be a fcn ptr). Return a set of those
+     * pointers. 
+     * 
+     */
 
     set<Function *> identifyRoutines(debugInfo *DI, Module &M, Function *parentFuncToFind)
     {
@@ -179,7 +182,6 @@ struct CAT : public ModulePass
                             auto firstArg = call->getArgOperand(0);
                             if (auto *routine = dyn_cast<Function>(firstArg))
                                 Routines.insert(routine); // save the pointer
-
                         }
                     }
                 }
@@ -188,6 +190,15 @@ struct CAT : public ModulePass
 
         return Routines;
     }
+
+    /*
+     * injectYield
+     * 
+     * Iterates over all fiber routines (from identyRoutines) and marks every 10th bitcode 
+     * instruction as an injection location. Iterate over all those locations to inject a 
+     * call to wrapper_nk_fiber_yield
+     * 
+     */
 
     void injectYield(debugInfo *DI, Module &M, Function *funcToInsert, set<Function *> Routines)
     {
@@ -252,6 +263,13 @@ struct CAT : public ModulePass
 
         return;
     }
+
+    /*
+     * inlineF
+     * 
+     * Iterate over all the uses of a function (passed as arg), and inline wherever possible
+     * 
+     */
 
     void inlineF(Function &F)
     {
