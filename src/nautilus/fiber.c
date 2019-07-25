@@ -116,12 +116,42 @@ void _fiber_push(nk_fiber_t * f, uint64_t x)
     *(uint64_t*)(f->rsp) = x;
 }
 
+nk_fiber_t* _rr_policy()
+{
+  // Get the sched queue from the fiber thread on the current CPU
+  nk_thread_t *cur_thread = _get_fiber_thread();
+  struct list_head *fiber_sched_queue = _get_sched_head(); 
+  
+  // Pick the fiber at the front of the queue and return it if the queue is not empty
+  nk_fiber_t *fiber_to_schedule = NULL;
+  if (!(list_empty(fiber_sched_queue))){
+    // Grab the first fiber from the sched queue
+    fiber_to_schedule = list_first_entry(fiber_sched_queue, nk_fiber_t, sched_node);
+    
+    // Remove the fiber from the sched queue
+    list_del_init(&(fiber_to_schedule->sched_node));
+  } else {
+    // If empty, reset the fiber sched queue
+    // MAC: might be unecessary (?)
+    list_del_init(fiber_sched_queue);
+    }
+
+  //DEBUG: prints the fiber that was just dequeued and indicates current and idle fiber
+  FIBER_DEBUG("_rr_policy() : just dequeued a fiber : %p\n", fiber_to_schedule);
+  FIBER_DEBUG("_rr_policy() : current fiber is %p and idle fiber is %p\n", _get_fiber_state()->curr_fiber,_get_fiber_state()->idle_fiber); 
+
+  // Returns the fiber to schedule (or NULL if no fiber to schedule)
+  return fiber_to_schedule;
+}
+
+
+
 void _nk_fiber_exit(nk_fiber_t *f)
 {
   // Set status of fiber to exiting
   f->f_status = EXIT;
   // Get the idle fiber for the current CPU
-  nk_fiber_t *idle = _nk_idle_fiber();
+  nk_fiber_t *next = NULL;
   
   // DEBUG: Prints out the exiting fiber's wait queue size
   FIBER_DEBUG("_nk_fiber_exit() : queue size is %d\n", f->num_wait);
@@ -150,10 +180,14 @@ void _nk_fiber_exit(nk_fiber_t *f)
   f->is_done = 1;
 
   //TODO: PROBABLY WANT TO DO THESE ATOMICALLY (Frees and changing curr fiber)
- 
-  _get_fiber_state()->curr_fiber = idle;
+  
+  next = _rr_policy();
+  if (!(next)) {
+    next = _nk_idle_fiber();
+  }
+  _get_fiber_state()->curr_fiber = next;
     
-  // Removes the idle fiber from the queue
+  // Removes the next fiber from the queue
   list_del_init(&(_get_fiber_state()->curr_fiber->sched_node));  
 
   // Free the current fiber's memory (stack, stack ptr, and wait queue)
@@ -161,7 +195,7 @@ void _nk_fiber_exit(nk_fiber_t *f)
   free(f);
   
    // Switch back to the idle fiber using special exit function
-  _nk_exit_switch(idle);
+  _nk_exit_switch(next);
 
   return;
 }
@@ -267,35 +301,6 @@ void _nk_fiber_init(nk_fiber_t *f)
 
 #endif
 
-nk_fiber_t* _rr_policy()
-{
-  // Get the sched queue from the fiber thread on the current CPU
-  nk_thread_t *cur_thread = _get_fiber_thread();
-  struct list_head *fiber_sched_queue = _get_sched_head();
-  
-  
-  // Pick the fiber at the front of the queue and return it if the queue is not empty
-  nk_fiber_t *fiber_to_schedule = NULL;
-  if (!(list_empty(fiber_sched_queue))){
-    // Grab the first fiber from the sched queue
-    fiber_to_schedule = list_first_entry(fiber_sched_queue, nk_fiber_t, sched_node);
-    
-    // Remove the fiber from the sched queue
-    list_del_init(&(fiber_to_schedule->sched_node));
-  } else {
-    // If empty, reset the fiber sched queue
-    // MAC: might be unecessary (?)
-    list_del_init(fiber_sched_queue);
-    }
-
-  //DEBUG: prints the fiber that was just dequeued and indicates current and idle fiber
-  FIBER_DEBUG("_rr_policy() : just dequeued a fiber : %p\n", fiber_to_schedule);
-  FIBER_DEBUG("_rr_policy() : current fiber is %p and idle fiber is %p\n", _get_fiber_state()->curr_fiber,_get_fiber_state()->idle_fiber); 
-
-  // Returns the fiber to schedule (or NULL if no fiber to schedule)
-  return fiber_to_schedule;
-}
-
 int _nk_fiber_yield_to(nk_fiber_t *f_to)
 {
   // Get the current fiber
@@ -307,7 +312,7 @@ int _nk_fiber_yield_to(nk_fiber_t *f_to)
   }
   
   // Enqueue the current fiber (if not on wait queue)
-  if (f_to != f_from && f_from->f_status != WAIT) {
+  if (f_from != _nk_idle_fiber() && f_from->f_status != WAIT) {
     // Gets the sched queue for the current CPU
     struct list_head *fiber_sched_queue = _get_sched_head();
     
@@ -701,7 +706,7 @@ int nk_fiber_start(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size
 // TODO MAC: check if we're running in the fiber thread before we allow yield to take place
 int nk_fiber_yield()
 {
-  if (_get_fiber_state()->fiber_thread != get_cur_thread()) {
+  if (_get_fiber_thread() != get_cur_thread()) {
     return 1;
   }
   // Pick a random fiber to yield to (NULL if no fiber in queue)
@@ -714,9 +719,14 @@ int nk_fiber_yield()
 
   // If f_to is NULL, there are no fibers in the queue
   // We can then exit early and sleep
-  if (f_to == NULL){
-   return 0;
-   FIBER_INFO("nk_fiber_yield() : yield aborted. Returning 0\n");
+  
+  if (f_to == NULL) { 
+    if (nk_fiber_current() == _nk_idle_fiber()) {
+      return 0;
+      FIBER_INFO("nk_fiber_yield() : yield aborted. Returning 0\n");
+    } else {
+        f_to = _nk_idle_fiber();
+      }
   }
   // Utility function to perform enqueue and other yield housekeeping
   return _nk_fiber_yield_to(f_to);
@@ -730,8 +740,19 @@ int nk_fiber_yield_to(nk_fiber_t *f_to)
     //DEBUG: Will indicate whether the fiber we're attempting to yield to was not found
     FIBER_DEBUG("nk_fiber_yield_to() : Failed to find fiber in queues :(\n");
     
+    nk_fiber_t *new_to = _rr_policy();
+
+    if (new_to == NULL) { 
+      if (nk_fiber_current() == _nk_idle_fiber()) {
+        return 0;
+        FIBER_INFO("nk_fiber_yield() : yield aborted. Returning 0\n");
+      } else {
+          new_to = _nk_idle_fiber();
+        }
+    }
+ 
     // If the fiber could not be found, we need to yield to a random fiber instead
-    _nk_fiber_yield_to(_rr_policy());
+    _nk_fiber_yield_to(new_to);
     // Return 1 to indicate failure
     return 1;
   }
