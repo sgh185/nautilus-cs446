@@ -124,9 +124,13 @@ int nk_fiber_yield();
 // Will yield to a random fiber if f_to is not available to yield to
 int nk_fiber_yield_to(nk_fiber_t *f_to);
 
+// Takes a fiber to yield to, a condition to yield on, and a function to check that condition
+// returns 1 if the fiber does not yield
+int nk_fiber_conditional_yield_to(nk_fiber_t *fib, uint8_t (*cond_function)(void *param), void *state);
+
 // Takes a fiber, a condition to yield on, and a function to check that condition
-// returns 0 if the fiber does not yield
-int nk_fiber_conditional_yield(nk_fiber_t *fib, uint8_t (*cond_function)(void *param), void *state);
+// returns 1 if the fiber does not yield
+int nk_fiber_conditional_yield(uint8_t (*cond_function)(void *param), void *state);
 
 // returns a copy of the currently running fiber with a new FID
 nk_fiber_t *nk_fiber_fork();

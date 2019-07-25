@@ -119,7 +119,6 @@ void _fiber_push(nk_fiber_t * f, uint64_t x)
 nk_fiber_t* _rr_policy()
 {
   // Get the sched queue from the fiber thread on the current CPU
-  nk_thread_t *cur_thread = _get_fiber_thread();
   struct list_head *fiber_sched_queue = _get_sched_head(); 
   
   // Pick the fiber at the front of the queue and return it if the queue is not empty
@@ -130,11 +129,7 @@ nk_fiber_t* _rr_policy()
     
     // Remove the fiber from the sched queue
     list_del_init(&(fiber_to_schedule->sched_node));
-  } else {
-    // If empty, reset the fiber sched queue
-    // MAC: might be unecessary (?)
-    list_del_init(fiber_sched_queue);
-    }
+  }
 
   //DEBUG: prints the fiber that was just dequeued and indicates current and idle fiber
   FIBER_DEBUG("_rr_policy() : just dequeued a fiber : %p\n", fiber_to_schedule);
@@ -170,7 +165,7 @@ void _nk_fiber_exit(nk_fiber_t *f)
     f->num_wait--;
     // DEBUG: Prints out what fibers are in waitq and what the waitq size is
     //FIBER_DEBUG("_nk_fiber_exit() : In waitq loop. Temp is %p and size is %d\n", temp, waitq->size);
-    if (temp != 0){
+    if (temp){
       // DEBUG: prints the number of fibers that temp is waiting on
       FIBER_DEBUG("_nk_fiber_exit() : restarting fiber %p on wait_queue %p\n", temp, waitq);
       nk_fiber_run(temp, 1);
@@ -225,7 +220,7 @@ void _fiber_wrapper(nk_fiber_t* f_to)
  *|  Ptr to Fiber Wrapper  |
  *|________________________|
  *|                        |
-  |    Dummy GPR VALUES    |
+ *|    Dummy GPR VALUES    |
  *|           .            |
  *|           .            |
  *|           .            |
@@ -764,11 +759,18 @@ int nk_fiber_yield_to(nk_fiber_t *f_to)
   return 0;
 }
 
-int nk_fiber_conditional_yield(nk_fiber_t *fib, uint8_t (*cond_function)(void *param), void *state)
+int nk_fiber_conditional_yield(uint8_t (*cond_function)(void *param), void *state)
 {
   if (cond_function(state)){
-    nk_fiber_yield();
-    return 0;
+    return nk_fiber_yield();
+  }
+  return 1;
+}
+
+int nk_fiber_conditional_yield_to(nk_fiber_t *fib, uint8_t (*cond_function)(void *param), void *state)
+{
+  if (cond_function(state)){
+    return nk_fiber_yield_to(fib);
   }
   return 1;
 }
