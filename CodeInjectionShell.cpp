@@ -14,20 +14,16 @@
 
 #include <vector>
 #include <map>
+#include <set>
 
 using namespace llvm;
 using namespace std;
 
-// Testing
 #define DEBUG 0
-#define YIELD_CALL "wrapper_nk_fiber_yield"
-
-// Function *YIELD = NULL;
+static string CALLS[] = {"wrapper_nk_fiber_yield", "nk_fiber_create"};
 
 namespace
 {
-
-// Useful to print out information later.
 struct debugInfo
 {
     // Code injection info:
@@ -61,22 +57,30 @@ struct CAT : public ModulePass
           the same info seen in doInitialization to the info seen in runOnModule
         */
 
-        // wrapper function needs to be preserved --- set to NoInline
-        auto yield = M.getFunction(YIELD_CALL);
-        if (yield != nullptr)
-            yield->addFnAttr(Attribute::NoInline);
+        // wrapper function, create function needs to be preserved --- set to NoInline
+        for (auto CALL : CALLS)
+        {
+            auto func = M.getFunction(CALL);
+            if (func != nullptr)
+                func->addFnAttr(Attribute::NoInline);
+        }
 
         return false;
     }
 
     bool runOnModule(Module &M) override
     {
-        // Find the function again --- here, it's safe to transform, granted it has not been discarded
-        Function *YIELD = M.getFunction(YIELD_CALL);
-        if (YIELD == nullptr)
+        // Find wrapper and create functions again --- here, it's safe to transform, granted it has not been discarded
+        Function *YIELD = M.getFunction(CALLS[0]);
+        Function *CREATE = M.getFunction(CALLS[1]);
+
+        if (!YIELD || !CREATE)
             return false;
 
 #if DEBUG
+        YIELD->print(errs());
+        CREATE->print(errs());
+
         // To print later
         DI = new debugInfo();
 
@@ -106,8 +110,16 @@ struct CAT : public ModulePass
         //           --- highlight and ignore tight loops, unroll loops if possible, etc.
         // TODO: analyzeModule(DI, M);
 
-        // INJECTING --- insert function call
-        injectYield(DI, M, YIELD);
+        // IDENTIFY ROUTINES
+        set<Function *> FiberRoutines = identifyRoutines(DI, M, CREATE);
+
+#if DEBUG
+        for (auto routine : FiberRoutines)
+            errs() << routine->getName() << "\n";
+#endif
+
+        // INJECTING --- insert function call (only inside fiber routines)
+        injectYield(DI, M, YIELD, FiberRoutines);
 
         // INLINING --- optional at the moment (possible with flags)
         for (auto &F : M)
@@ -134,19 +146,58 @@ struct CAT : public ModulePass
         return false;
     }
 
-    void injectYield(debugInfo *DI, Module &M, Function *funcToInsert)
+    set<Function *> identifyRoutines(debugInfo *DI, Module &M, Function *parentFuncToFind)
+    {
+        set<Function *> Routines;
+        for (auto &F : M)
+        {
+            for (auto &B : F)
+            {
+                for (auto &I : B)
+                {
+                    if (auto *call = dyn_cast<CallInst>(&I))
+                    {
+                        Function *callee = call->getCalledFunction();
+
+                        // Don't look for function if it's LLVM internals/NULL
+                        if (callee == nullptr || callee->isIntrinsic())
+                            continue;
+
+#if DEBUG
+                        errs() << "\n\n\n\n\n";
+                        errs() << "Current CallInst: ";
+                        call->print(errs());
+                        errs() << "\n";
+                        errs() << "callee is "
+                               << callee->getName();
+                        errs() << "\n";
+#endif
+
+                        if (callee == parentFuncToFind)
+                        {
+                            // First arg of nk_fiber_create is a fcn ptr to the routine
+                            auto firstArg = call->getArgOperand(0);
+                            if (auto *routine = dyn_cast<Function>(firstArg))
+                                Routines.insert(routine); // save the pointer
+
+                        }
+                    }
+                }
+            }
+        }
+
+        return Routines;
+    }
+
+    void injectYield(debugInfo *DI, Module &M, Function *funcToInsert, set<Function *> Routines)
     {
         int64_t count = 0;
         vector<Instruction *> InstructionsToInject;
 
-        // Mark locations to inject --- currently every 3 lines
-        for (auto &F : M)
+        // Mark locations to inject --- currently every 10 bitcode instructions of every routine
+        for (auto routine : Routines)
         {
-            // Don't inject in bitcode level debugging/LLVM internals/inside nk_fiber_yield
-            if (F.isIntrinsic() || &F == funcToInsert)
-                continue;
-
-            for (auto &B : F)
+            for (auto &B : *routine)
             {
                 for (auto &I : B)
                 {
@@ -154,7 +205,7 @@ struct CAT : public ModulePass
                         continue;
 
                     count++;
-                    if (count == 10) // Naive implementation injects every 50 lines
+                    if (count == 10) // Naive implementation injects every 10 bitcode instructions
                     {
 #if DEBUG
                         errs() << "\nCurrrent instruction to push back: ";
@@ -173,7 +224,6 @@ struct CAT : public ModulePass
 #endif
 
         // Build CallInst to yield, insert into module
-
         for (auto i : InstructionsToInject)
         {
 #if DEBUG
@@ -245,8 +295,8 @@ struct CAT : public ModulePass
             auto inlined = InlineFunction(CI, IFI);
             if (!inlined)
             {
-#if DEBUG
 
+#if DEBUG
                 errs() << "Didn't inline --- failed at the following CI: \n";
                 CI->print(errs());
                 errs() << "\n";
@@ -254,6 +304,7 @@ struct CAT : public ModulePass
                 DI->failedInlines[CI] = inlined.message;
                 DI->numFailedInlines++;
 #endif
+
                 abort();
             }
 #if DEBUG
