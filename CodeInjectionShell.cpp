@@ -125,9 +125,9 @@ struct CAT : public ModulePass
         injectYield(DI, M, YIELD, FiberRoutines);
 
         // INLINING --- inline the wrapper_nk_fiber_yield, inline all routines
-        inlineF(&YIELD);        
+        inlineF(*YIELD);        
         for (auto routine : FiberRoutines)
-            inlineF(routine);
+            inlineF(*routine);
 
         
         // Cleanup
