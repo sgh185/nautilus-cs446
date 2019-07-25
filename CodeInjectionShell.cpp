@@ -20,7 +20,7 @@ using namespace std;
 
 // Testing
 #define DEBUG 0
-#define YIELD_CALL "nk_fiber_yield"
+#define YIELD_CALL "wrapper_nk_fiber_yield"
 
 // Function *YIELD = NULL;
 
@@ -49,39 +49,33 @@ struct CAT : public ModulePass
 {
     static char ID;
     debugInfo *DI;
-    Function *YIELD = nullptr;
 
     CAT() : ModulePass(ID) {}
 
     bool doInitialization(Module &M) override
     {
-        // Granted all modules are linked, "nk_fiber_yield" will be found, set YIELD accordingly
-        auto yield = M.getFunction(YIELD_CALL);
-        errs() << "IN INIT\n";
-	// yield->print(errs());
-	if (yield != NULL)
-            YIELD = yield;
+        /*
+        - Function is not ready to be transformed at this point, metadata is not set
+        - Other transformations from the clang command (most likely -fgnu89-inline) modifies
+          the bitcode in a way that keeping a pointer to wrapper_nk_fiber_yield may not contain
+          the same info seen in doInitialization to the info seen in runOnModule
+        */
 
-	// YIELD->print(errs());
-        errs() << "DO INIT\n";
-	errs() << &M << "\n ";
-	errs() << YIELD;
-	
-	YIELD->addFnAttr(Attribute::NoInline);
-	return false;
+        // wrapper function needs to be preserved --- set to NoInline
+        auto yield = M.getFunction(YIELD_CALL);
+        if (yield != nullptr)
+            yield->addFnAttr(Attribute::NoInline);
+
+        return false;
     }
 
     bool runOnModule(Module &M) override
     {
-	YIELD = M.getFunction(YIELD_CALL);
+        // Find the function again --- here, it's safe to transform, granted it has not been discarded
+        Function *YIELD = M.getFunction(YIELD_CALL);
         if (YIELD == nullptr)
             return false;
 
-	errs() << "SOMETHING\n" << YIELD;
-	errs() << "\n " << &M;
-	
-        errs() << "YIELD: " << YIELD->getName();
-        YIELD->print(errs());
 #if DEBUG
         // To print later
         DI = new debugInfo();
@@ -125,7 +119,7 @@ struct CAT : public ModulePass
             if (F.empty())
                 continue;
 
-            // Inline nk_fiber_yield
+            // Inline wrapper_nk_fiber_yield
             if (&F == YIELD)
                 inlineF(F);
         }
@@ -149,7 +143,7 @@ struct CAT : public ModulePass
         for (auto &F : M)
         {
             // Don't inject in bitcode level debugging/LLVM internals/inside nk_fiber_yield
-            if (F.isIntrinsic() || &F == YIELD)
+            if (F.isIntrinsic() || &F == funcToInsert)
                 continue;
 
             for (auto &B : F)
@@ -160,7 +154,7 @@ struct CAT : public ModulePass
                         continue;
 
                     count++;
-                    if (count == 50) // Naive implementation injects every 50 lines
+                    if (count == 10) // Naive implementation injects every 50 lines
                     {
 #if DEBUG
                         errs() << "\nCurrrent instruction to push back: ";
@@ -321,5 +315,4 @@ static RegisterStandardPasses _RegPass1(PassManagerBuilder::EP_OptimizerLast,
 static RegisterStandardPasses _RegPass2(PassManagerBuilder::EP_EnabledOnOptLevel0,
                                         [](const PassManagerBuilder &, legacy::PassManagerBase &PM) {
         if(!_PassMaker){ PM.add(_PassMaker = new CAT()); } });
-
 
