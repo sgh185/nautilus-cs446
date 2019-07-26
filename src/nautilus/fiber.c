@@ -57,13 +57,20 @@
 #define STACK_CLONE_DEPTH 2
 #define GPR_RAX_OFFSET 0x70
 
+/* Macros for accessing parts of the fiber state */
 #define _GET_FIBER_STATE() get_cpu()->f_state
 #define _NK_IDLE_FIBER() get_cpu()->f_state->idle_fiber
 #define _GET_FIBER_THREAD() get_cpu()->f_state->fiber_thread
 #define _GET_SCHED_HEAD() &(get_cpu()->f_state->f_sched_queue)
+#define _GET_SCHED_QUEUE_LOCK() get_cpu()->f_state->lock
+#define _GET_FIBER_LOCK(f) f->lock
+#define _LOCK_SCHED_QUEUE() spin_lock(_GET_SCHED_QUEUE_LOCK()) 
+#define _UNLOCK_SCHED_QUEUE() spin_unlock(_GET_SCHED_QUEUE_LOCK()) 
+#define _LOCK_FIBER(f) spin_lock(_GET_FIBER_LOCK(f))
+#define _UNLOCK_FIBER(f) spin_unlock(_GET_FIBER_LOCK(f))
 
 typedef struct nk_fiber_percpu_state {
-    spinlock_t  lock;
+    spinlock_t  *lock;
     nk_thread_t *fiber_thread;
     nk_fiber_t *curr_fiber;
     nk_fiber_t *idle_fiber;
@@ -105,6 +112,12 @@ nk_thread_t *_get_fiber_thread()
 struct list_head* _get_sched_head()
 {
   return &(_get_fiber_state()->f_sched_queue); 
+}
+
+// returns the fiber sched queue lock
+spinlock_t *_get_sched_queue_lock()
+{
+  return _GET_SCHED_QUEUE_LOCK(); 
 }
 
 /*
@@ -415,7 +428,7 @@ static struct nk_fiber_percpu_state *init_local_fiber_state()
 	
 	memset(state, 0, sizeof(struct nk_fiber_percpu_state));
     
-    spinlock_init(&state->lock);
+    spinlock_init(state->lock);
    
     // Promote to fiber thread
     INIT_LIST_HEAD(&(state->f_sched_queue));
