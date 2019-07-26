@@ -20,7 +20,7 @@ using namespace llvm;
 using namespace std;
 
 #define DEBUG 0
-static string CALLS[] = {"wrapper_nk_fiber_yield", "nk_fiber_create"};
+static string CALLS[] = {"wrapper_nk_fiber_yield", "nk_fiber_create", "nk_fiber_yield"};
 
 namespace
 {
@@ -73,9 +73,13 @@ struct CAT : public ModulePass
         // Find wrapper and create functions again --- here, it's safe to transform, granted it has not been discarded
         Function *YIELD = M.getFunction(CALLS[0]);
         Function *CREATE = M.getFunction(CALLS[1]);
+        Function *INNER_YIELD = M.getFunction(CALLS[2]);
 
-        if (!YIELD || !CREATE)
+        if (!YIELD || !CREATE || !INNER_YIELD)
             return false;
+
+        // Force inlining of nk_fiber_yield (should only occur in wrapper_nk_fiber_yield)
+        inlineF(*INNER_YIELD);
 
 #if DEBUG
         YIELD->print(errs());
@@ -125,12 +129,11 @@ struct CAT : public ModulePass
         injectYield(DI, M, YIELD, FiberRoutines);
 
         // INLINING --- inline the wrapper_nk_fiber_yield, inline all routines
-        inlineF(*YIELD);        
+        inlineF(*YIELD);
         for (auto routine : FiberRoutines)
             inlineF(*routine);
 
-        
-        // Cleanup
+            // Cleanup
 #if DEBUG
         printDebugInfo(DI);
         free(DI);
