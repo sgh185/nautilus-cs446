@@ -42,6 +42,9 @@
 
 struct nk_virtual_console *vc;
 
+
+/******************* Test Routines *******************/
+
 void fiber_inner(void *i, void **o)
 {
   nk_fiber_set_vc(vc);
@@ -327,6 +330,9 @@ void second_timer(void *i, void **o)
   nk_vc_printf("Second Timer is finished, a = %d\n", a);
 }
 
+
+/******************* Test Wrappers *******************/
+
 int test_fibers_counter(){
   nk_fiber_t *even;
   nk_fiber_t *odd;
@@ -440,6 +446,8 @@ int test_fiber_timing(){
 }
 
 
+/******************* Test Handlers *******************/
+
 static int
 handle_fibers (char * buf, void * priv)
 {
@@ -515,6 +523,8 @@ handle_fibers10 (char * buf, void * priv)
 }
 
 
+/******************* Shell Structs ********************/
+
 static struct shell_cmd_impl fibers_impl = {
   .cmd      = "fibertest",
   .help_str = "fibertest",
@@ -575,6 +585,8 @@ static struct shell_cmd_impl fibers_impl10 = {
   .handler  = handle_fibers10,
 };
 
+
+/******************* Shell Commands *******************/
 
 nk_register_shell_cmd(fibers_impl);
 nk_register_shell_cmd(fibers_impl2);
