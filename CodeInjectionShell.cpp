@@ -20,7 +20,20 @@ using namespace llvm;
 using namespace std;
 
 #define DEBUG 0
-static string CALLS[] = {"wrapper_nk_fiber_yield", "nk_fiber_create", "nk_fiber_yield"};
+#define INLINE 1
+#define INJECT 1
+
+#define WRAPPER_YIELD 0
+#define INNER_YIELD 1
+#define FIBER_START 2
+#define FIBER_CREATE 3
+#define IDLE_FIBER_ROUTINE 4
+
+#define FREQUENCY 25
+
+const vector<uint32_t> NK_ids = {WRAPPER_YIELD, INNER_YIELD, FIBER_START, FIBER_CREATE, IDLE_FIBER_ROUTINE};
+const vector<string> NK_names = {"wrapper_nk_fiber_yield", "nk_fiber_yield", "nk_fiber_start", "nk_fiber_create", "__nk_fiber_idle"};
+map<uint32_t, Function *> FIBERS;
 
 namespace
 {
@@ -58,7 +71,7 @@ struct CAT : public ModulePass
         */
 
         // wrapper function, create function needs to be preserved --- set to NoInline
-        for (auto CALL : CALLS)
+        for (auto CALL : NK_names)
         {
             auto func = M.getFunction(CALL);
             if (func != nullptr)
@@ -70,16 +83,28 @@ struct CAT : public ModulePass
 
     bool runOnModule(Module &M) override
     {
-        // Find wrapper and create functions again --- here, it's safe to transform, granted it has not been discarded
-        Function *YIELD = M.getFunction(CALLS[0]);
-        Function *CREATE = M.getFunction(CALLS[1]);
-        Function *INNER_YIELD = M.getFunction(CALLS[2]);
+        // Find fiber_functions again --- here, it's safe to transform, granted it has not been discarded
+        for (auto i : NK_ids)
+        {
+            auto func = M.getFunction(NK_names[i]);
+            if (func != NULL)
+                FIBERS[i] = func;
+        }
 
-        if (!YIELD || !CREATE || !INNER_YIELD)
-            return false;
+        // Terminate pass if unable to find any of the functions
+        for (auto const &[id, func] : FIBERS)
+        {
+            if (!func)
+                return false;
+        }
 
+#if INLINE
         // Force inlining of nk_fiber_yield (should only occur in wrapper_nk_fiber_yield)
-        inlineF(*INNER_YIELD);
+        inlineF(*(FIBERS[INNER_YIELD]));
+
+        // Force inlining of nk_fiber_start to generate direct calls to nk_fiber_create
+        inlineF(*(FIBERS[FIBER_START]));
+#endif
 
 #if DEBUG
         YIELD->print(errs());
@@ -117,8 +142,9 @@ struct CAT : public ModulePass
         TODO: analyzeModule(DI, M);
         */
 
+#if INJECT
         // IDENTIFY ROUTINES
-        set<Function *> FiberRoutines = identifyRoutines(DI, M, CREATE);
+        set<Function *> FiberRoutines = identifyRoutines(DI, M, FIBERS[FIBER_CREATE]);
 
 #if DEBUG
         for (auto routine : FiberRoutines)
@@ -126,12 +152,15 @@ struct CAT : public ModulePass
 #endif
 
         // INJECTING --- insert function call (only inside fiber routines)
-        injectYield(DI, M, YIELD, FiberRoutines);
+        injectYield(DI, M, FIBERS[WRAPPER_YIELD], FiberRoutines);
+#endif
 
+#if INLINE
         // INLINING --- inline the wrapper_nk_fiber_yield, inline all routines
-        inlineF(*YIELD);
+        inlineF(*(FIBERS[WRAPPER_YIELD]));
         for (auto routine : FiberRoutines)
             inlineF(*routine);
+#endif
 
             // Cleanup
 #if DEBUG
@@ -184,7 +213,10 @@ struct CAT : public ModulePass
                             // First arg of nk_fiber_create is a fcn ptr to the routine
                             auto firstArg = call->getArgOperand(0);
                             if (auto *routine = dyn_cast<Function>(firstArg))
-                                Routines.insert(routine); // save the pointer
+                            {
+                                if (routine != FIBERS[IDLE_FIBER_ROUTINE])
+                                    Routines.insert(routine); // save the pointer
+                            }
                         }
                     }
                 }
@@ -219,7 +251,7 @@ struct CAT : public ModulePass
                         continue;
 
                     count++;
-                    if (count == 10) // Naive implementation injects every 10 bitcode instructions
+                    if (count == FREQUENCY) // Naive implementation injects every 10 bitcode instructions
                     {
 #if DEBUG
                         errs() << "\nCurrrent instruction to push back: ";
