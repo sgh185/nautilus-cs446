@@ -29,7 +29,7 @@ using namespace std;
 #define FIBER_CREATE 3
 #define IDLE_FIBER_ROUTINE 4
 
-#define FREQUENCY 25
+#define FREQUENCY 50
 
 const vector<uint32_t> NK_ids = {WRAPPER_YIELD, INNER_YIELD, FIBER_START, FIBER_CREATE, IDLE_FIBER_ROUTINE};
 const vector<string> NK_names = {"wrapper_nk_fiber_yield", "nk_fiber_yield", "nk_fiber_start", "nk_fiber_create", "__nk_fiber_idle"};
@@ -52,6 +52,9 @@ struct debugInfo
     // Info on INITIAL yield calls in module --- print if necessary
     vector<CallInst *> InitCallsToYield;
     int64_t initNumCallsToYield;
+
+    // Info on fiber routines found
+    vector<string> RoutineNames;
 };
 
 struct CAT : public ModulePass
@@ -100,15 +103,18 @@ struct CAT : public ModulePass
 
 #if INLINE
         // Force inlining of nk_fiber_yield (should only occur in wrapper_nk_fiber_yield)
-        inlineF(*(FIBERS[INNER_YIELD]));
+        inlineF(DI, *(FIBERS[INNER_YIELD]));
 
         // Force inlining of nk_fiber_start to generate direct calls to nk_fiber_create
-        inlineF(*(FIBERS[FIBER_START]));
+        inlineF(DI, *(FIBERS[FIBER_START]));
 #endif
 
 #if DEBUG
-        YIELD->print(errs());
-        CREATE->print(errs());
+        for (auto const &[id, func] : FIBERS)
+        {
+            if (!func)
+                func->print(errs());
+        }
 
         // To print later
         DI = new debugInfo();
@@ -126,7 +132,7 @@ struct CAT : public ModulePass
                     if (auto *call = dyn_cast<CallInst>(&I))
                     {
                         Function *callee = call->getCalledFunction();
-                        if (callee == YIELD)
+                        if (callee == FIBERS[WRAPPER_YIELD])
                             DI->InitCallsToYield.push_back(call);
                     }
                 }
@@ -148,7 +154,7 @@ struct CAT : public ModulePass
 
 #if DEBUG
         for (auto routine : FiberRoutines)
-            errs() << routine->getName() << "\n";
+            DI->RoutineNames.push_back(routine->getName());
 #endif
 
         // INJECTING --- insert function call (only inside fiber routines)
@@ -157,9 +163,9 @@ struct CAT : public ModulePass
 
 #if INLINE
         // INLINING --- inline the wrapper_nk_fiber_yield, inline all routines
-        inlineF(*(FIBERS[WRAPPER_YIELD]));
+        inlineF(DI, *(FIBERS[WRAPPER_YIELD]));
         for (auto routine : FiberRoutines)
-            inlineF(*routine);
+            inlineF(DI, *routine);
 #endif
 
             // Cleanup
@@ -306,7 +312,7 @@ struct CAT : public ModulePass
      * 
      */
 
-    void inlineF(Function &F)
+    void inlineF(debugInfo *DI, Function &F)
     {
         vector<CallInst *> CIToIterate;
         InlineFunctionInfo IFI;
@@ -355,7 +361,7 @@ struct CAT : public ModulePass
                 errs() << "\n";
                 errs() << "INLINED failure message is: " << inlined.message << "\n";
                 DI->failedInlines[CI] = inlined.message;
-                DI->numFailedInlines++;
+                // DI->numFailedInlines++;
 #endif
 
                 abort();
@@ -363,7 +369,7 @@ struct CAT : public ModulePass
 #if DEBUG
             else
             {
-                DI->totalInlines++;
+                // DI->totalInlines++;
                 errs() << "**** Successful Inline ****\n";
             }
 #endif
@@ -376,29 +382,34 @@ struct CAT : public ModulePass
         errs() << "\n\n\nDEBUGGING INFO\n";
         errs() << "Total Lines: " << DI->totalLines << "\n";
         errs() << "Total Injections: " << DI->totalInjections << "\n";
-        for (auto IL : DI->InjectionLocations)
-        {
-            errs() << "Injection Location: ";
-            IL->print(errs());
-            errs() << "\n";
-        }
+        // for (auto IL : DI->InjectionLocations)
+        // {
+        //     errs() << "Injection Location: ";
+        //     IL->print(errs());
+        //     errs() << "\n";
+        // }
 
-        errs() << "Total Inlines: " << DI->totalInlines << "\n";
-        errs() << "Total Failed Inlines: " << DI->numFailedInlines << "\n";
+        // errs() << "Total Inlines: " << DI->totalInlines << "\n";
+        // errs() << "Total Failed Inlines: " << DI->numFailedInlines << "\n";
 
-        DI->initNumCallsToYield = DI->InitCallsToYield.size();
-        errs() << "Initial Number of Calls To Yield: " << DI->initNumCallsToYield << "\n";
+        // DI->initNumCallsToYield = DI->InitCallsToYield.size();
+        // errs() << "Initial Number of Calls To Yield: " << DI->initNumCallsToYield << "\n";
 
-        if (DI->totalInlines == 0)
-        {
-            errs() << "All initial calls to yield:\n";
-            for (auto call : DI->InitCallsToYield)
-            {
-                errs() << "Call: ";
-                call->print(errs());
-                errs() << "\n";
-            }
-        }
+        // if (DI->totalInlines == 0)
+        // {
+        //     errs() << "All initial calls to yield:\n";
+        //     for (auto call : DI->InitCallsToYield)
+        //     {
+        //         errs() << "Call: ";
+        //         call->print(errs());
+        //         errs() << "\n";
+        //     }
+        // }
+
+        errs() << "Routines found: \n";
+        for (auto name : DI->RoutineNames)
+            errs() << name << "\n";
+
         return;
     }
 
