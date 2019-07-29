@@ -1,0 +1,1 @@
+cmd_src/test/built-in.o :=  ld -z max-page-size=0x1000 -melf_x86_64 -dp  -r -o src/test/built-in.o src/test/threads.o src/test/groups.o src/test/tasks.o src/test/bsp.o src/test/net_udp_echo.o src/test/test.o src/test/fibers.o src/test/instrument.o src/test/ipi.o src/test/benchmark.o

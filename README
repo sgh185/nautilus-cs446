@@ -1,4 +1,4 @@
-Basic pass to insert and inline the "nk_fiber_yield" function call every 50 lines of code. *** 
+*** Basic pass to insert and inline the "nk_fiber_yield" function call every 25 lines of code. *** 
 
 Technical issues:
 - [SOLVED]  Injecting function that doesn't exist in current module (i.e. yield)
@@ -22,11 +22,11 @@ Technical issues:
 
 - [SOLVED] --- -fgnu89-inline was possibly inlining nk_fiber_yield for this version of nautilus (not sure why), so injecting without calls to nk_fiber_yield or the function body were not present in runOnModule(), fixed by setting attribute in doInitialization to Attribute::NoInline  ;   LLVM::Module::getFunction() fails to recognize nk_fiber_yield in latest commit to Nautilus (mikedev, 7/24/19), with no memory corruption or leaked pointers.
 
+########
+
 Conceptual issues:
-- Injecting yield calls is not smart in all occurrences (e.g. critical sections, presence of locks, etc.), smarter
-  to inject in programmer-written routines, IGNORE at context switching/register saving functions in fiber.c, IGNORE
-  injecting calls inside deep loops
-- [SOLVED] Inlining is necessary post linking ; Inlining via code may not be necessary, pass in flag "analyzer-config ipa=dynamic"
+- Injecting yield calls is not smart in all occurrences (e.g. critical sections, presence of locks, etc.), smarter to inject in programmer-written routines, IGNORE at context switching/register saving functions in fiber.c, DO INJECT calls inside tight loops
+- [SOLVED] Inlining is necessary post linking, forcing inlining of nk_fiber_yield, nk_fiber_create before inlining all routines and wrapper_nk_fiber_yield ; Inlining via code may not be necessary, pass in flag "analyzer-config ipa=dynamic"
 - What should be classified as a tight loop? (Potentially technical issue, likely answered in prior compilers research)
 
 ########
