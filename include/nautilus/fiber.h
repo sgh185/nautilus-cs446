@@ -42,7 +42,8 @@ extern "C" {
 
 typedef uint64_t nk_stack_size_t;
 typedef struct nk_thread nk_thread_t;
-#define CPU_ANY -1
+#define FIBER_RAND_CPU_FLAG -2
+#define FIBER_CURR_CPU_FLAG -1
 
 /* common thread stack sizes */
 #define FSTACK_DEFAULT 0 // will be 4K
@@ -73,29 +74,26 @@ typedef struct nk_fiber {
   uint16_t fpu_state_offset;   /* +16 SHOULD NOT CHANGE POSITION */
   
   nk_stack_size_t stack_size;
-  unsigned long fid; /* Fiber ID, may not be needed? */
     
-  spinlock_t lock; /* allows us to lock the fiber */
+  spinlock_t *lock; /* allows us to lock the fiber */
   nk_fiber_status f_status;
   
   // TODO MAC: need to figure out screen/keyboard I/O
   struct nk_virtual_console *vc; // for printing
   int is_idle; // indicates whether this is the idle fiber
 
-  // PAD: there can be many more fibers than threads
-  // Also, you can embed this without a pointer if you use the fixed size
-  // just define fiber_queue earlier.
-  // also - these are fibers waiting on this fiber, right?
-  // Do you also want to track the fibers children, like threads do?   
-
   struct list_head wait_queue; // wait queue for fibers waiting on this fiber
   struct list_head wait_node;
   int num_wait;             // number of fibers on this fiber's wait queue
 
+  // List for keeping track of fiber's children
+  struct list_head fiber_children;
+  struct list_head child_node;
+  int num_children;
   
-  // TODO MAC: Rename l_head and change name everywhere in code
   struct list_head sched_node; // sched queue node
-  
+  int curr_cpu;  // current cpu the fiber is on
+
   nk_fiber_fun_t fun; // routine the fiber will execute
   void *input;  // input for the fiber's routine
   void **output;  // output for the fiber's routine
@@ -108,14 +106,23 @@ nk_fiber_t *nk_fiber_current();
 
 // TODO MAC: Reformat to make function header span multiple lines
 // Create a fiber but do not launch it
-int nk_fiber_create(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, nk_fiber_t **fiber_output);
+int nk_fiber_create(nk_fiber_fun_t fun,
+                    void *input,
+                    void **output,
+                    nk_stack_size_t stack_size,
+                    nk_fiber_t **fiber_output);
 
 // TODO MAC: Have this take CPU instead of flag (-1 is any CPU, otherwise choose specific CPU)
 // Launch a previously created fiber
-int nk_fiber_run(nk_fiber_t *f, uint8_t random_cpu_flag);
+int nk_fiber_run(nk_fiber_t *f, int target_cpu);
 
 // Create and launch a fiber
-int nk_fiber_start(nk_fiber_fun_t fun, void *input, void **output, nk_stack_size_t stack_size, uint8_t random_cpu_flag, nk_fiber_t **fiber_output);
+int nk_fiber_start(nk_fiber_fun_t fun,
+                   void *input,
+                   void **output,
+                   nk_stack_size_t stack_size,
+                   int target_cpu,
+                   nk_fiber_t **fiber_output);
 
 // Default yield function, implemented on top of conditional yield
 int nk_fiber_yield();
