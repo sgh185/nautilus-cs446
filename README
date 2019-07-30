@@ -24,7 +24,7 @@ Technical issues:
 
 ########
 
-Conceptual issues:
+Conceptual issues (with the pass):
 - Injecting yield calls is not smart in all occurrences (e.g. critical sections, presence of locks, etc.), smarter to inject in programmer-written routines, IGNORE at context switching/register saving functions in fiber.c, DO INJECT calls inside tight loops
 - [SOLVED] Inlining is necessary post linking, forcing inlining of nk_fiber_yield, nk_fiber_create before inlining all routines and wrapper_nk_fiber_yield ; Inlining via code may not be necessary, pass in flag "analyzer-config ipa=dynamic"
 - What should be classified as a tight loop? (Potentially technical issue, likely answered in prior compilers research)
@@ -32,3 +32,13 @@ Conceptual issues:
 ########
 
 inject script: used to install pass, link modules, build nautilus after invoking the pass. CAT-c build (Simone) is necessary in order to build nautilus with the pass.
+
+#######
+
+Conceptual ideas (research question)
+CURRENT THINKING:
+- Replicate the routine that invokes nk_simple_timing_loop(100) and nk_fiber_yield right after --- using the pass. Variance on both should be close to 0.
+- Take the time between yields --- replicate it even for routines that are more complicated. For example --- if there's a routine that does a complex matrix multiply (or something of the like), it will take more cycles/time than nk_simple_timing_loop(100). At this point, the pass needs to figure out how to simulate the number of cycles nk_simple_timing_loop(100) takes, and yields at the beginning and end of a block of instructions perceived to take the same number of cycles to execute. Using LLVM Profilers here is a possibility, llvm-exegesis/mca may be useful here.- Loops may need to be preserved and unrolled after in order to perform the injection properly.
+OTHER TRACK:
+- Generate a CFG. Look at all possible execution sequences (sequences of basic blocks). Insert a yield call into each basic block.
+- Next step --- profiler catches which execution sequences are intensive and which ones are not (this may be based on a threshold of isIntensive() == true, else). For intensive sequences, add yield calls (how many?? --- based on block size?). For non-intensive sequences, don't bother. NOTE: Preventing injection in non-intensive sequences is probably good for reducing overhead
