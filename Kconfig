@@ -472,7 +472,7 @@ config VIRTUAL_CONSOLE_SERIAL_MIRROR_ALL
     config FIBER_THREAD_SLEEP_TIME
          int "sleep time for fiber threads"
          depends on ENABLE_SLEEP
-         default 10000000
+         default 100000000
          help
            The amount of time the fiber thread will sleep for when
            there are no fibers on the fiber queue.

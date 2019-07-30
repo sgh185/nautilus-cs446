@@ -394,46 +394,18 @@ static nk_thread_t *_get_random_fiber_thread()
 // TODO MAC: Completely unecessary, put lock on fibers and then
 // check state (running, idle, waiting) and act accordingly
 
-// Checks all queues for the specified fiber and removes it from the queue if found
-static int _check_all_queues_remove(nk_fiber_t *to_del)
-{
-  // Gets number of CPUs on system
-  struct sys_info *sys = per_cpu_get(system);
-  int cpu_iter = sys->num_cpus;
-
-  // Iterates through sched queues on each CPU
-  struct list_head *temp;
-  nk_fiber_t *test;
-  for (int iter = 0; iter < cpu_iter; iter++){
-    // Checks each sched queue to see if it contains to_del
-    temp = &(sys->cpus[iter]->f_state->f_sched_queue);
-    list_for_each_entry(test, temp, sched_node){
-      //DEBUG: Prints all the fibers (and queues) that are being checked
-      FIBER_DEBUG("_check_all_queues_remove() : %d outer loop and %p is the temp fiber\n", iter, test);
-      
-      // If the fiber is found, remove it from the sched queue and return 0 (to indicate success)
-      if (test == to_del){
-        list_del_init(&(to_del->sched_node));
-        return 0;
-      }
-    }
-  }
-  // Fiber was not found, return -1 to indicate failure
-  return -1;
-}
-
 static int _check_yield_to(nk_fiber_t *to_del){
-  //_LOCK_FIBER(to_del);
+  _LOCK_FIBER(to_del);
   if (to_del->f_status != READY) {
      FIBER_DEBUG("_check_yield_to() : to_del's status is %s\n", to_del->f_status);
-     //_UNLOCK_FIBER(to_del);
+     _UNLOCK_FIBER(to_del);
      return 0;
   } else {
       fiber_state *state = per_cpu_get(system)->cpus[to_del->curr_cpu]->f_state;
       //_LOCK_SCHED_QUEUE(state);
       list_del_init(&(to_del->sched_node));
       //_UNLOCK_SCHED_QUEUE(state);
-      //_UNLOCK_FIBER(to_del);
+      _UNLOCK_FIBER(to_del);
       return 1;
   }
 }
