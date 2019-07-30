@@ -745,7 +745,6 @@ int nk_fiber_yield()
   if (f_to == NULL) { 
     if (nk_fiber_current() == _NK_IDLE_FIBER()) {
       return 1;
-      FIBER_INFO("nk_fiber_yield() : yield aborted. Returning 0\n");
     } else {
         f_to = _NK_IDLE_FIBER();
       }
@@ -914,6 +913,11 @@ int nk_fiber_join(nk_fiber_t *wait_on)
 
   // Adds curr_fiber to wait_on's wait queue
   // Not safe, need to lock before we enqueue
+  if (wait_on->is_done || wait_on->f_status == EXIT){
+    FIBER_INFO("nk_fiber_join() : tried to join a thread which is finshed or exiting\n");
+    return -1;
+  }
+
   wait_on->curr_cpu = -1;
   struct list_head *wait_q = &(wait_on->wait_queue);
   list_add_tail(&(curr_fiber->wait_node), wait_q);
