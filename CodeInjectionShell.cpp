@@ -15,6 +15,7 @@
 #include <vector>
 #include <map>
 #include <set>
+#include <unordered_map>
 
 using namespace llvm;
 using namespace std;
@@ -22,6 +23,7 @@ using namespace std;
 #define DEBUG 0
 #define INLINE 1
 #define INJECT 1
+#define FALSE 0
 
 #define WRAPPER_YIELD 0
 #define INNER_YIELD 1
@@ -29,7 +31,7 @@ using namespace std;
 #define FIBER_CREATE 3
 #define IDLE_FIBER_ROUTINE 4
 
-#define FREQUENCY 50
+#define FREQUENCY 25
 
 const vector<uint32_t> NK_ids = {WRAPPER_YIELD, INNER_YIELD, FIBER_START, FIBER_CREATE, IDLE_FIBER_ROUTINE};
 const vector<string> NK_names = {"wrapper_nk_fiber_yield", "nk_fiber_yield", "nk_fiber_start", "nk_fiber_create", "__nk_fiber_idle"};
@@ -66,6 +68,9 @@ struct CAT : public ModulePass
 
     bool doInitialization(Module &M) override
     {
+#if FALSE
+        return false;
+#endif
         /*
         - Function is not ready to be transformed at this point, metadata is not set
         - Other transformations from the clang command (most likely -fgnu89-inline) modifies
@@ -86,12 +91,17 @@ struct CAT : public ModulePass
 
     bool runOnModule(Module &M) override
     {
+#if FALSE
+        return false;
+#endif
         // Find fiber_functions again --- here, it's safe to transform, granted it has not been discarded
         for (auto i : NK_ids)
         {
             auto func = M.getFunction(NK_names[i]);
             if (func != NULL)
                 FIBERS[i] = func;
+            else
+                return false;
         }
 
         // Terminate pass if unable to find any of the functions
@@ -101,12 +111,13 @@ struct CAT : public ModulePass
                 return false;
         }
 
-#if INLINE
+#if INJECT
         // Force inlining of nk_fiber_yield (should only occur in wrapper_nk_fiber_yield)
         inlineF(DI, *(FIBERS[INNER_YIELD]));
 
         // Force inlining of nk_fiber_start to generate direct calls to nk_fiber_create
         inlineF(DI, *(FIBERS[FIBER_START]));
+
 #endif
 
 #if DEBUG
@@ -156,7 +167,6 @@ struct CAT : public ModulePass
         for (auto routine : FiberRoutines)
             DI->RoutineNames.push_back(routine->getName());
 #endif
-
         // INJECTING --- insert function call (only inside fiber routines)
         injectYield(DI, M, FIBERS[WRAPPER_YIELD], FiberRoutines);
 #endif
@@ -249,23 +259,37 @@ struct CAT : public ModulePass
         // Mark locations to inject --- currently every 10 bitcode instructions of every routine
         for (auto routine : Routines)
         {
+            count = 0;
+
             for (auto &B : *routine)
             {
-                for (auto &I : B)
-                {
-                    if (isa<PHINode>(&I)) // Can't inject in PHINode block, breaks LLVM invariant
-                        continue;
+                count = 0;
 
-                    count++;
-                    if (count == FREQUENCY) // Naive implementation injects every 10 bitcode instructions
+                // if the block is small enough --- inject at the end of the block
+                if (B.size() < FREQUENCY)
+                {
+                    if (!isa<PHINode>(B.getTerminator()))
+                        InstructionsToInject.push_back(B.getTerminator());
+                }
+                // if the block is large enough --- inject every FREQUENCY instructions
+                else
+                {
+                    for (auto &I : B)
                     {
+                        if (isa<PHINode>(&I)) // Can't inject in PHINode block, breaks LLVM invariant
+                            continue;
+
+                        count++;
+                        if (count == FREQUENCY) // Naive implementation injects every 10 bitcode instructions
+                        {
 #if DEBUG
-                        errs() << "\nCurrrent instruction to push back: ";
-                        I.print(errs());
-                        errs() << "\n";
+                            errs() << "\nCurrrent instruction to push back: ";
+                            I.print(errs());
+                            errs() << "\n";
 #endif
-                        InstructionsToInject.push_back(&I);
-                        count = 0;
+                            InstructionsToInject.push_back(&I);
+                            count = 0;
+                        }
                     }
                 }
             }
