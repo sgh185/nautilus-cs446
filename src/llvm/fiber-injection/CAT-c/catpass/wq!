@@ -1,0 +1,450 @@
+#include <vector>
+#include <set>
+#include <map>
+#include <queue>
+#include "llvm/Pass.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/BasicBlock.h"
+#include "llvm/Transforms/Utils/BasicBlockUtils.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/IR/LegacyPassManager.h"
+#include "llvm/Transforms/IPO/PassManagerBuilder.h"
+#include "llvm/ADT/SparseBitVector.h"
+#include "llvm/IR/CFG.h"
+#include "llvm/IR/Constants.h"
+
+using namespace llvm;
+using namespace std;
+
+#define CAT_ADD 0
+#define CAT_SUB 1
+#define CAT_NEW 2
+#define CAT_GET 3
+#define CAT_SET 4
+
+const vector<uint32_t> CAT_ids = {CAT_ADD, CAT_SUB, CAT_NEW, CAT_GET, CAT_SET};
+const vector<string> CAT_names = {"CAT_add", "CAT_sub", "CAT_new", "CAT_get", "CAT_set"};
+map<Function *, uint32_t> CATs;
+
+namespace
+{
+struct CAT : public FunctionPass
+{
+    static char ID;
+
+    CAT() : FunctionPass(ID) {}
+
+    // This function is invoked once at the initialization phase of the compiler
+    // The LLVM IR of functions isn't ready at this point
+    bool doInitialization(Module &M) override
+    {
+        // fillCATs(&CAT_ids, &CATs, &M);
+        for (auto i = 0; i < CAT_ids.size(); i++)
+        {
+            auto func = M.getFunction(CAT_names[CAT_ids[i]]);
+            if (func != NULL)
+                CATs[func] = CAT_ids[i];
+        }
+
+        return false;
+    }
+
+    // This function is invoked once per function compiled
+    // The LLVM IR of the input functions is ready and it can be analyzed and/or transformed
+    bool runOnFunction(Function &F) override
+    {
+        errs() << "START FUNCTION: " << F.getName() << "\n";
+
+        //data structures necessary to hold sets, etc --- may make this a struct later
+        vector<Instruction *> Instructions;
+        map<Instruction *, uint32_t> InstructionIDs;
+        map<Instruction *, SparseBitVector<>> GEN;
+        map<Instruction *, SparseBitVector<>> KILL;
+        map<Instruction *, SparseBitVector<>> IN;
+        map<Instruction *, SparseBitVector<>> OUT;
+        map<Instruction *, set<Instruction *>> defs;
+        map<Instruction *, set<Instruction *>> CFG;
+
+        /* **** PREPROCESSING **** 
+        Several steps --- broken into separate for loops for 
+        code readability */
+
+        //Fill out instructions vector, fill out ids table
+        uint32_t id = 0;
+        for (auto &B : F)
+        {
+            for (auto &I : B)
+            {
+                Instructions.push_back(&I);
+                InstructionIDs[&I] = id;
+                id++;
+            }
+        }
+
+        //Fill out definitions table
+        for (auto &B : F)
+        {
+            for (auto &I : B)
+            {
+                if (auto *call = dyn_cast<CallInst>(&I)) // if the instruction contains a call
+                {
+                    //call->getFunction() --> gets the "parent" function of the instruction, where it's located
+                    //call as as CallInst contains information about the function used in the instruction in addition
+                    // to where it was used as well ... F.getName() also gets the same thing as call->getFunction()
+                    Function *callee = call->getCalledFunction(); // get function that was called in the instruction
+
+                    if (CATs.count(callee) > 0)
+                    {
+                        auto id = CATs[callee];
+                        switch (id)
+                        {
+                        case CAT_NEW:
+                        {
+                            defs[&I] = set<Instruction *>();
+                            defs[&I].insert(&I);
+                        }
+                        break;
+                        case CAT_ADD:
+                        case CAT_SUB:
+                        case CAT_SET:
+                        {
+                            auto definition = cast<Instruction>(call->getArgOperand(0));
+                            defs[definition].insert(&I);
+                        }
+                        break;
+                        }
+                    }
+                }
+            }
+        }
+        /* END PREPROCESSING */
+
+        //gen and kill sets
+        for (auto &B : F)
+        {
+            for (auto &I : B)
+            {
+                GEN[&I] = SparseBitVector<>();  //set<Instruction *>;
+                KILL[&I] = SparseBitVector<>(); //set<Instruction *>;
+
+                if (auto *call = dyn_cast<CallInst>(&I)) // if the instruction contains a call
+                {
+                    Function *callee = call->getCalledFunction(); // get function that was called in the instruction
+
+                    if (CATs.count(callee) > 0)
+                    {
+                        auto id = CATs[callee];
+                        switch (id)
+                        {
+                        case CAT_NEW:
+                        {
+                            if (defs.count(&I) > 0)
+                            {
+                                GEN[&I].set(InstructionIDs[&I]); //gen set will contain first def
+                                for (set<Instruction *>::iterator E = defs[&I].begin(); E != (defs[&I].end()); E++)
+                                {
+                                    if (InstructionIDs[*E] != InstructionIDs[&I])
+                                        KILL[&I].set(InstructionIDs[*E]);
+                                }
+                            }
+                        }
+                        break;
+                        case CAT_ADD:
+                        case CAT_SUB:
+                        case CAT_SET:
+                        {
+
+                            auto zero_call_inst = cast<Instruction>(call->getArgOperand(0));
+                            if (defs.count(zero_call_inst) > 0)
+                            {
+                                GEN[&I].set(InstructionIDs[&I]); //gen set will contain first def
+                                for (set<Instruction *>::iterator E = defs[zero_call_inst].begin(); E != (defs[zero_call_inst].end()); E++)
+                                {
+                                    if (InstructionIDs[*E] != InstructionIDs[&I])
+                                        KILL[&I].set(InstructionIDs[*E]);
+                                }
+                            }
+                        }
+                        break;
+                        }
+                    }
+                }
+            }
+        }
+        //----------------------------------------
+        //----------------------------------------
+        //constructing pseudo CFG --- only accounting for terminator of pred BB to front inst of successor BB
+        //The idea here is that the in set of an instruction will be computed from the pred instruction ONLY
+        //if it's not the first instruction of a basic block. If it's the first instruction of a basic block
+        //then the in set is the union of ALL predecessors (of which there can be many) --- so the pseudo CFG
+        //stores all the terminators of the pred basic blocks --- mapped to the instruction of the successor BB's
+        //first instruction
+        for (auto &B : F)
+        {
+            Instruction *first = &(B.front());
+            CFG[first] = set<Instruction *>();
+            for (auto predBB : predecessors(&B))
+            {
+                Instruction *terminator = predBB->getTerminator();
+                CFG[first].insert(terminator);
+            }
+        }
+
+        //------IN AND OUT SETS ----------
+
+        //init in and out sets
+        for (auto &B : F)
+        {
+            for (auto &I : B)
+            {
+                IN[&I] = SparseBitVector<>();
+                OUT[&I] = SparseBitVector<>();
+            }
+        }
+
+        //This is the algorithm shown in class (non-worklist)
+        //The OUT sets will be recomputed until there are NO CHANGES to any OUT sets. This process
+        //is very simple as the sparse bit vectors
+        //allow for the out sets to be computed using simple - and || operations
+        //(The implementation of the bitwise instructions were found on pg 394 of the textbook)
+        bool changed = true;
+        while (changed)
+        {
+            changed = false; // we want to change to true when analyzing out sets
+            for (auto &B : F)
+            {
+                Instruction *pred_inst = NULL;
+
+                //save temp for comparison purposes
+                map<Instruction *, SparseBitVector<>> temp = OUT;
+
+                for (auto &I : B)
+                {
+                    //IN SETS
+                    if (CFG.count(&I) > 0) // the instruction IS FIRST instruction of BB
+                    {
+                        for (auto &terminator : CFG[&I])
+                            IN[&I] = IN[&I] | OUT[terminator]; // union
+                    }
+
+                    else if (CFG.count(&I) == 0) // the instruction is NOT first instruction of BB
+                        IN[&I] = IN[&I] | OUT[pred_inst];
+
+                    //OUT SETS
+                    OUT[&I] = OUT[&I] | (GEN[&I] | (IN[&I] - KILL[&I]));
+
+                    pred_inst = &I; // while loop --- so the instruction needs to be incremnted
+                }
+
+                if (temp != OUT) // if there was a change
+                    changed = true;
+            }
+        }
+
+        //H4 --- Constant propagation
+
+        // init worklist
+        queue<uint32_t> workList;
+        for (auto I : Instructions)
+            workList.push(InstructionIDs[I]);
+
+        // apply constant prop until no more changes are made
+        while (!(workList.empty()))
+        {
+            Instruction *I = Instructions[workList.front()]; // get first element in the worklist
+
+            /*if (I->use_empty()) {
+                workList.pop();
+                I->eraseFromParent();
+            }*/
+
+            if (auto *call = dyn_cast<CallInst>(I)) // if the instruction contains a call
+            {
+                Function *callee = call->getCalledFunction(); // get function that was called in the instruction
+                if (CATs.count(callee) > 0)
+                {
+                    auto id = CATs[callee];
+                    if (id == CAT_NEW)
+                    {
+                        errs() << "I'm in CAT_NEW\n";
+                        if (I->use_empty())
+                            I->eraseFromParent();
+                        else
+                        {
+                            workList.pop();
+                            workList.push(InstructionIDs[I]);
+                        }
+                    }
+                    else if (id == CAT_GET)
+                    {
+                        errs() << "I'm in CAT_GET\n";
+                        auto GET_ARG_ONE = cast<Instruction>(call->getArgOperand(0));
+                        uint32_t count = 0;
+                        for (auto in : IN[I])
+                        {
+                            errs() << "I'm in the for loop\n";
+                            if (InstructionIDs[GET_ARG_ONE] == in)
+                                count++;
+                            errs() << "COUNT IS " << count << "\n";
+                        }
+
+                        if (count == 1)
+                        {
+                            errs() << "Printing get inst\n";
+                            GET_ARG_ONE->print(errs());
+                            errs() << "\n";
+                            CallInst *val
+                            auto v = cast<Value>(call->getArgOperand(0)->getArgOperand(0));
+                            errs() << "This is v: ";
+                            v->print(errs());
+                            errs() << "\n";
+                            if (isa<ConstantInt>(v))
+                            {
+                                ConstantInt *arg = cast<ConstantInt>(v);
+                                int64_t c = arg->getSExtValue();
+                                ConstantInt *newArg = ConstantInt::get(arg->getType(), c);
+                                BasicBlock::iterator ii(call);
+                                errs() << "*****I'm about to replace*****\n";
+                                ReplaceInstWithValue(I->getParent()->getInstList(), ii, newArg);
+                            }
+                            else
+                            {
+                                workList.push(InstructionIDs[I]);
+                            }
+                        }
+                        workList.pop();
+                    }
+                    else
+                    {
+                        workList.pop();
+                    }
+                    /*
+                    switch (id)
+                    {
+                    case CAT_NEW:
+                    {
+                        if (I->use_empty())
+                            I->eraseFromParent();
+                        else
+                        {
+                            workList.pop();
+                            workList.push(InstructionIDs[I]);
+                        }
+                    }
+                    break;
+                    case CAT_GET:
+                    {
+                        auto GET_ARG_ONE = cast<Instruction>(call->getArgOperand(0));
+                        uint32_t count = 0;
+                        for (auto in : IN[I])
+                        {
+                            if (InstructionIDs[GET_ARG_ONE] == in)
+                                count++;
+                        }
+
+                        if (count == 1)
+                        {
+                            auto v = cast<Value>(GET_ARG_ONE);
+                            if (isa<ConstantInt>(v))
+                            {
+                                ConstantInt *arg = cast<ConstantInt>(v);
+                                int64_t c = arg->getSExtValue();
+                                ConstantInt *newArg = ConstantInt::get(arg->getType(), c);
+                                BasicBlock::iterator ii(call);
+                                ReplaceInstWithValue(I->getParent()->getInstList(), ii, newArg);
+                            }
+                            else
+                            {
+                                workList.push(InstructionIDs[I]);
+                            }
+                        }
+                        workList.pop();
+                    }
+                    break;
+                    
+                    case CAT_ADD:
+                    {
+                    }
+                    break;
+                    case CAT_SUB:
+                    {
+                    }
+                    break;
+                    case CAT_SET:
+                    {
+                    }
+                    break;
+                    default:
+                    {
+                        workList.pop();
+                    }
+                    break;
+                    }*/
+                }
+            }
+            errs() << "\nNEXT: ******\n";
+            I->print(errs());
+            errs() << "\n";
+            workList.pop();
+        }
+
+        //printing
+        /*
+        for (auto &B : F)
+        {
+            for (auto &I : B)
+            {
+                errs() << "INSTRUCTION: ";
+                I.print(errs());
+                errs() << "\n";
+                errs() << "***************** "
+                       << "IN"
+                       << "\n{"
+                       << "\n";
+                for (auto in : IN[&I])
+                {
+                    errs() << " " << *(Instructions[in]) << "\n";
+                }
+                errs() << "}"
+                       << "\n**************************************\n";
+
+                errs() << "***************** "
+                       << "OUT"
+                       << "\n{"
+                       << "\n";
+                for (auto out : OUT[&I])
+                {
+                    errs() << " " << *(Instructions[out]) << "\n";
+                }
+                errs() << "}"
+                       << "\n**************************************\n";
+                errs() << "\n\n\n";
+            }
+        }*/
+        return false;
+    }
+
+    // We don't modify the program, so we preserve all analyses.
+    // The LLVM IR of functions isn't ready at this point
+    void
+    getAnalysisUsage(AnalysisUsage &AU) const override
+    {
+        //errs() << "Hello LLVM World at \"getAnalysisUsage\"\n" ;
+        AU.setPreservesAll();
+    }
+}; // namespace
+} // namespace
+// Next there is code to register your pass to "opt"
+char CAT::ID = 0;
+static RegisterPass<CAT> X("CAT", "Homework for the CAT class");
+
+// Next there is code to register your pass to "clang"
+static CAT *_PassMaker = NULL;
+static RegisterStandardPasses _RegPass1(PassManagerBuilder::EP_OptimizerLast,
+                                        [](const PassManagerBuilder &, legacy::PassManagerBase &PM) {
+        if(!_PassMaker){ PM.add(_PassMaker = new CAT());} }); // ** for -Ox
+static RegisterStandardPasses _RegPass2(PassManagerBuilder::EP_EnabledOnOptLevel0,
+                                        [](const PassManagerBuilder &, legacy::PassManagerBase &PM) {
+        if(!_PassMaker){ PM.add(_PassMaker = new CAT()); } }); // ** for -O0
+
