@@ -1,0 +1,6 @@
+*** Preliminary testing for injection pass on fibers *** 
+- Pass executed with NO inject or inline settings (return false on both doInitialization, runOnModule)
+- Test executed: 'fibertime1'
+- Cycles per Iteration: ~5500
+- Inject script --- Clang commands edited: -fno-unroll-loops added to generation of src/test/fibers.bc, src/test/instrument.bc, src/nautilus/fiber.bc
+

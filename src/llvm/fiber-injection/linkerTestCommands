@@ -1,0 +1,33 @@
+*** Example linker with LLVM (using CAT API, kernel.c as dummy file with function outside of module) ***
+clang -emit-llvm -c kernel.c -o kernel.bc
+llvm-link program_optimized.bc kernel.bc -o everything.bc
+clang -O3 -lm everything.bc ../misc/CAT.bc -o program_optimized2
+llvm-dis everything.bc
+
+### Peter --- following may be useful when working with Nautilus
+clang -c kernel.c # generate kernel.o
+clang -O3 -lm program_optimized.bc kernel.o ../misc/CAT.bc -o test # link, NOTE: -lm is invoking math library
+
+*** Example linker with LLVM (using Nautilus, fiber.c as external module, programmer-written code "fiber-program.c" (fiber-program.bc)) *** 
+
+# Generate bitcode for programmer-written routine/code:
+
+clang -emit-llvm -c fiber-program.c -o fiber-program.bc
+llvm-dis fiber-program.bc
+
+
+# Generate bitcode for fiber source code:
+
+clang -emit-llvm -c fiber.c -o fiber.bc
+llvm-dis fiber.bc
+
+
+# Link the program and the source code
+
+llvm-link fiber-program.bc fiber.bc -o fiber-program-full.bc
+
+
+# Perform optimizations (NOTE: -CIY is injection pass flag)
+
+opt -O3 fiber-program-full.bc -basicaa -globals-aa -cfl-steens-aa -tbaa -scev-aa -cfl-anders-aa -CIY -o fiber-program-full-optimized.bc &> compiler_output
+llvm-dis fiber-program-full-optimized.bc

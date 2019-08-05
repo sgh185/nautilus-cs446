@@ -1,0 +1,6 @@
+*** Preliminary testing for injection pass on fibers *** 
+- Pass executed with inject and inline settings, injecting every 3 bitcode instructions
+- Test executed: 'fibertime1'
+- Cycles per Iteration: Infinite loop of wrapper_nk_fiber_yields
+- Inject script --- Clang commands NOT edited
+

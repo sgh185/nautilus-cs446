@@ -1,0 +1,5 @@
+*** Preliminary testing for injection pass on fibers *** 
+- Pass executed with NO inject or inline settings (return false on both doInitialization, runOnModule)
+- Test executed: 'fibertime1'
+- Cycles per Iteration: ~7500-8500
+- Inject script --- Clang commands NOT edited
