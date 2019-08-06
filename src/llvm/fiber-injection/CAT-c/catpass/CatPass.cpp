@@ -18,7 +18,6 @@
 #include "llvm/IR/DebugInfo.h"
 
 #include <vector>
-#include <map>
 #include <set>
 #include <unordered_map>
 #include <queue>
@@ -45,7 +44,7 @@ using namespace std;
 
 const vector<uint32_t> NK_ids = {WRAPPER_YIELD, INNER_YIELD, FIBER_START, FIBER_CREATE, IDLE_FIBER_ROUTINE};
 const vector<string> NK_names = {"wrapper_nk_fiber_yield", "nk_fiber_yield", "nk_fiber_start", "nk_fiber_create", "__nk_fiber_idle"};
-map<uint32_t, Function *> FIBERS;
+unordered_map<uint32_t, Function *> FIBERS;
 
 namespace
 {
@@ -58,7 +57,7 @@ struct debugInfo
 
     // Inline information
     int64_t totalInlines;
-    map<CallInst *, string> failedInlines;
+    unordered_map<CallInst *, string> failedInlines;
     int64_t numFailedInlines;
 
     // Info on INITIAL yield calls in module --- print if necessary
@@ -114,14 +113,8 @@ struct CAT : public ModulePass
                 return false;
         }
 
-        // Terminate pass if unable to find any of the functions
-        for (auto const &[id, func] : FIBERS)
-        {
-            if (!func)
-                return false;
-        }
-
-        bool stripped = StripDebugInfo(M);
+        // Get rid of LLVM internals/intrinsics
+        StripDebugInfo(M);
 
 #if INJECT
         // Force inlining of nk_fiber_yield (should only occur in wrapper_nk_fiber_yield)
@@ -185,10 +178,8 @@ struct CAT : public ModulePass
              * to compute the adjusted control flow graph (that uses SparseBitVectors and set differences)
              */
 
-            // stripDebugInfo(*routine);
-
             vector<BasicBlock *> BasicBlocks;
-            map<BasicBlock *, uint64_t> BBIDs;
+            unordered_map<BasicBlock *, uint64_t> BBIDs;
 
             uint32_t id = 0;
             for (auto &B : *routine)
@@ -210,12 +201,17 @@ struct CAT : public ModulePass
             */
 
             set<Instruction *> LoopTerminators;
-            map<BasicBlock *, SparseBitVector<>> BackEdges = findBackEdgePredecessors(*routine, BBIDs, LoopTerminators);
-            map<BasicBlock *, SparseBitVector<>> AP = genAdjustedPredecessors(*routine, BackEdges, BBIDs);
+            unordered_map<BasicBlock *, SparseBitVector<>> BackEdgesPredecessors;
+            unordered_map<BasicBlock *, SparseBitVector<>> BackEdgesSuccessors;
+            findBackEdges(*routine, BBIDs, LoopTerminators, BackEdgesPredecessors, BackEdgesSuccessors);
+
+            unordered_map<BasicBlock *, SparseBitVector<>> AP;
+            unordered_map<BasicBlock *, SparseBitVector<>> AS;
+            genAdjustedCFG(*routine, BackEdgesPredecessors, BackEdgesSuccessors, BBIDs, AP, AS);
 
             // Latency calculations
-            map<Instruction *, double> ExpLatencies;
-            map<Instruction *, double> MaxLatencies;
+            unordered_map<Instruction *, double> ExpLatencies;
+            unordered_map<Instruction *, double> MaxLatencies;
             calculateLatencies(*routine, AP, ExpLatencies, MaxLatencies, BasicBlocks);
 
             /*
@@ -225,8 +221,6 @@ struct CAT : public ModulePass
             */
 
             // NOTE: Need a successor graph to generate injection locations
-            map<BasicBlock *, SparseBitVector<>> BackEdgeSuccessors = findBackEdgeSuccessors(*routine, BBIDs);
-            map<BasicBlock *, SparseBitVector<>> AS = genAdjustedSuccessors(*routine, BackEdgeSuccessors, BBIDs);
             set<Instruction *> InjectionLocations;
 
             markInjectionLocationsFromLatencies(&(routine->getEntryBlock()), ExpLatencies, MaxLatencies, AS, BasicBlocks, 0, 0, InjectionLocations);
@@ -382,7 +376,7 @@ struct CAT : public ModulePass
     }
 
     /*
-     * identifyRoutines
+     * identifyRoutines (REFACTORED)
      * 
      * Iterates over all call instructions. For every CallInst that calls nk_fiber_create, 
      * fetch the first argument of that call (which will be a fcn ptr). Return a set of those
@@ -393,41 +387,19 @@ struct CAT : public ModulePass
     set<Function *> identifyRoutines(debugInfo *DI, Module &M, Function *parentFuncToFind)
     {
         set<Function *> Routines;
-        for (auto &F : M)
+
+        // Iterate over uses of nk_fiber_create
+        for (auto &use : parentFuncToFind->uses())
         {
-            for (auto &B : F)
+            User *user = use.getUser();
+            if (auto *call = dyn_cast<CallInst>(user))
             {
-                for (auto &I : B)
+                // First arg of nk_fiber_create is a fcn ptr to the routine
+                auto firstArg = call->getArgOperand(0);
+                if (auto *routine = dyn_cast<Function>(firstArg))
                 {
-                    if (auto *call = dyn_cast<CallInst>(&I))
-                    {
-                        Function *callee = call->getCalledFunction();
-
-                        // Don't look for function if it's LLVM internals/NULL
-                        if (callee == nullptr || callee->isIntrinsic())
-                            continue;
-
-#if DEBUG
-                        errs() << "\n\n\n\n\n";
-                        errs() << "Current CallInst: ";
-                        call->print(errs());
-                        errs() << "\n";
-                        errs() << "callee is "
-                               << callee->getName();
-                        errs() << "\n";
-#endif
-
-                        if (callee == parentFuncToFind)
-                        {
-                            // First arg of nk_fiber_create is a fcn ptr to the routine
-                            auto firstArg = call->getArgOperand(0);
-                            if (auto *routine = dyn_cast<Function>(firstArg))
-                            {
-                                if (routine != FIBERS[IDLE_FIBER_ROUTINE])
-                                    Routines.insert(routine); // save the pointer
-                            }
-                        }
-                    }
+                    if (routine != FIBERS[IDLE_FIBER_ROUTINE])
+                        Routines.insert(routine); // save the pointer
                 }
             }
         }
@@ -436,20 +408,21 @@ struct CAT : public ModulePass
     }
 
     /*
-     * findBackEdgePredecessors --- 
+     * findBackEdges --- (REFACTORED)
      * Tracks all back edges that exist in a routine in a bit vector 
      * structure. Applies the FindFunctionBackedges API --- and converts the structure of the  result
-     * so that each backedge BasicBlock maps to a bit vector of predecessor basic blocks based 
+     * so that each backedge BasicBlock maps to a bit vector of predecessor/successor basic blocks based 
      * on the backedges found by FindFunctionBackedges. Function also fills out the LoopTerminators
-     * set to be used by findInjectionLocations
+     * set to be used by findInjectionLocations.
      */
 
-    // *** NEEDS REFACTORING (combine findBackEdgePredecessors and findBackEdgeSuccessors) ***
-
-    map<BasicBlock *, SparseBitVector<>> findBackEdgePredecessors(Function &F, map<BasicBlock *, uint64_t> IDs, set<Instruction *> &LT)
+    void findBackEdges(Function &F,
+                       unordered_map<BasicBlock *, uint64_t> IDs,
+                       set<Instruction *> &LT,
+                       unordered_map<BasicBlock *, SparseBitVector<>> &BEP,
+                       unordered_map<BasicBlock *, SparseBitVector<>> &BES)
     {
-        map<BasicBlock *, SparseBitVector<>> BackEdgesPredecessors;
-
+        // Takes FindFunctionBackedges API result --- reorganizes it for this pass
         SmallVector<pair<const BasicBlock *, const BasicBlock *>, 32> Edges;
         FindFunctionBackedges(F, Edges);
 
@@ -461,86 +434,60 @@ struct CAT : public ModulePass
             // Insert the block that contains the back-edge --- will contain the last instruction of loop
             LT.insert(BEContainer->getTerminator());
 
-            if (BackEdgesPredecessors.find(BEContainer) == BackEdgesPredecessors.end())
-                BackEdgesPredecessors[BEContainer] = SparseBitVector<>();
+            // Predecessors
+            if (BEP.find(BEContainer) == BEP.end())
+                BEP[BEContainer] = SparseBitVector<>();
 
-            BackEdgesPredecessors[BEContainer].set(IDs[BEBlock]);
+            BEP[BEContainer].set(IDs[BEBlock]);
+
+            // Successors
+            if (BES.find(BEBlock) == BES.end())
+                BES[BEBlock] = SparseBitVector<>();
+
+            BES[BEBlock].set(IDs[BEContainer]);
         }
 
-        return BackEdgesPredecessors;
-    }
-
-    // Successor version of findBackEdgePredecessors --- does not modify LoopTerminators set.
-    map<BasicBlock *, SparseBitVector<>> findBackEdgeSuccessors(Function &F, map<BasicBlock *, uint64_t> IDs)
-    {
-        map<BasicBlock *, SparseBitVector<>> BackEdgesSuccessors;
-
-        SmallVector<pair<const BasicBlock *, const BasicBlock *>, 32> Edges;
-        FindFunctionBackedges(F, Edges);
-
-        for (uint64_t i = 0, e = Edges.size(); i != e; ++i)
-        {
-            BasicBlock *BEBlock = const_cast<BasicBlock *>(Edges[i].first);      // The predecessor (back-edge) block
-            BasicBlock *BEContainer = const_cast<BasicBlock *>(Edges[i].second); // The block that contains a back-edge
-
-            if (BackEdgesSuccessors.find(BEBlock) == BackEdgesSuccessors.end())
-                BackEdgesSuccessors[BEBlock] = SparseBitVector<>();
-
-            BackEdgesSuccessors[BEBlock].set(IDs[BEContainer]);
-        }
-
-        return BackEdgesSuccessors;
+        return;
     }
 
     /*
-     * genAdjustedPredecessors --- 
-     * Generates a slightly different mapping of predecessors for the BasicBlocks in a function. Since
-     * the current pass ignores backedges in loops --- the adjustedPredecessors data structure needs to
-     * prevent tracking of backedges. Set difference (using bit vectors) is performed to account for this
-     * nuance.
+     * genAdjustedCFG --- (REFACTORED)
+     * Generates a slightly different mapping of predecessors and successors for the BasicBlocks 
+     * in a function. Since the current pass ignores backedges in loops --- the adjustedPredecessors/Successors 
+     * (AP, AS) data structure needs to prevent tracking of backedges. Set difference (using bit vectors) is 
+     * performed to account for thisnuance.
      */
 
-    // *** NEEDS REFACTORING (combine genAdjustedPredecessors and genAdjustedSuccessors) ***
-
-    map<BasicBlock *, SparseBitVector<>> genAdjustedPredecessors(Function &F, map<BasicBlock *, SparseBitVector<>> BEs, map<BasicBlock *, uint64_t> IDs)
+    void genAdjustedCFG(Function &F,
+                        unordered_map<BasicBlock *, SparseBitVector<>> &BEP,
+                        unordered_map<BasicBlock *, SparseBitVector<>> &BES,
+                        unordered_map<BasicBlock *, uint64_t> &IDs,
+                        unordered_map<BasicBlock *, SparseBitVector<>> &AP,
+                        unordered_map<BasicBlock *, SparseBitVector<>> &AS)
     {
-        map<BasicBlock *, SparseBitVector<>> AP;
-
-        // Generate a pseudo CFG based on predecessors --- all back-edges are removed from the graph
-        // (based on adjustedPredecessors).
+        // Generate a pseudo CFG based on successors and predecessors --- all back-edges are removed from the graph
         for (auto &B : F)
         {
+            // Predecessors
             AP[&B] = SparseBitVector<>();
 
             for (auto predBB : predecessors(&B))
                 AP[&B].set(IDs[predBB]);
 
-            if (BEs.find(&B) != BEs.end())
-                AP[&B] = AP[&B] - BEs[&B];
-        }
+            if (BEP.find(&B) != BEP.end())
+                AP[&B] = AP[&B] - BEP[&B];
 
-        return AP;
-    }
-
-    // Successor version of genAdjustedPredecessors --- applies adjustedSuccessors mapping
-    map<BasicBlock *, SparseBitVector<>> genAdjustedSuccessors(Function &F, map<BasicBlock *, SparseBitVector<>> BEs, map<BasicBlock *, uint64_t> IDs)
-    {
-        map<BasicBlock *, SparseBitVector<>> AS;
-
-        // Generate a pseudo CFG based on successors --- all back-edges are removed from the graph
-        // (based on adjustedSuccessors).
-        for (auto &B : F)
-        {
+            // Successors
             AS[&B] = SparseBitVector<>();
 
             for (auto succBB : successors(&B))
                 AS[&B].set(IDs[succBB]);
 
-            if (BEs.find(&B) != BEs.end())
-                AS[&B] = AS[&B] - BEs[&B];
+            if (BES.find(&B) != BES.end())
+                AS[&B] = AS[&B] - BES[&B];
         }
 
-        return AS;
+        return;
     }
 
     /*
@@ -553,12 +500,12 @@ struct CAT : public ModulePass
      * maximum latencies exist for the previous block. If not, the block is pushed back to the worklist
      */
 
-    // *** NEEDS REFACTORING  --- (c++ question --- better to pass ptr to map or map as obj?) ***
+    // *** NEEDS REFACTORING ***
     void calculateLatencies(Function &F,
-                            map<BasicBlock *, SparseBitVector<>> adjustedPredecessors,
-                            map<Instruction *, double> &EXP,
-                            map<Instruction *, double> &MAX,
-                            vector<BasicBlock *> BasicBlocks)
+                            unordered_map<BasicBlock *, SparseBitVector<>> &adjustedPredecessors,
+                            unordered_map<Instruction *, double> &EXP,
+                            unordered_map<Instruction *, double> &MAX,
+                            vector<BasicBlock *> &BasicBlocks)
     {
         queue<BasicBlock *> workList;
         for (auto &B : F)
@@ -585,7 +532,7 @@ struct CAT : public ModulePass
                 {
                     BasicBlock *realPred = BasicBlocks[BBID];
                     adjustedPredBB.push_back(realPred);
-                    Instruction *realPredFront = &(realPred->front());
+                    Instruction *realPredTerminator = realPred->getTerminator();
 
                     /* 
                     If expected or maximum latencies of the predecessor blocks don't exist (i.e. 
@@ -593,7 +540,8 @@ struct CAT : public ModulePass
                     for computation. Push back to the workList and continue.
                     */
 
-                    if (EXP.find(realPredFront) == EXP.end() || MAX.find(realPredFront) == MAX.end())
+                    if (EXP.find(realPredTerminator) == EXP.end() ||
+                        MAX.find(realPredTerminator) == MAX.end())
                     {
                         readyToCompute = false;
                         break;
@@ -710,9 +658,9 @@ struct CAT : public ModulePass
 
     // ************ NEEDS MAJOR REFACTORING (RECURSION + LARGE STACK) ************
     void markInjectionLocationsFromLatencies(BasicBlock *B,
-                                             map<Instruction *, double> &EXP,
-                                             map<Instruction *, double> &MAX,
-                                             map<BasicBlock *, SparseBitVector<>> &AS,
+                                             unordered_map<Instruction *, double> &EXP,
+                                             unordered_map<Instruction *, double> &MAX,
+                                             unordered_map<BasicBlock *, SparseBitVector<>> &AS,
                                              vector<BasicBlock *> &BasicBlocks,
                                              double lastEXPHit,
                                              double lastMAXHit,
@@ -986,30 +934,6 @@ struct CAT : public ModulePass
         }
 
         return;
-    }
-
-    void stripDebugInfo(Function &F)
-    {
-        vector<Instruction *> DebugInstructions;
-
-        for (auto &B : F)
-        {
-            for (auto &I : B)
-            {
-                if (auto *call = dyn_cast<CallInst>(&I))
-                {
-                    Function *callee = call->getCalledFunction();
-                    if (callee != nullptr)
-                    {
-                        if (callee->getName().startswith("llvm.dbg"))
-                            DebugInstructions.push_back(&I);
-                    }
-                }
-            }
-        }
-
-        for (auto DI : DebugInstructions)
-            DI->eraseFromParent();
     }
 
     /*
