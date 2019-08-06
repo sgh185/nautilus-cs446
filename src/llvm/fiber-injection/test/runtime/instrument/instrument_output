@@ -1,0 +1,2 @@
+clang-8: error: no such file or directory: 'src/llvm/fiber-injection/test/runtime/instrument/instrument_link.bc'
+clang-8: warning: -loops: 'linker' input unused [-Wunused-command-line-argument]

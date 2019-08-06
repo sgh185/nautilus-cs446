@@ -15,6 +15,7 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/IR/DebugInfo.h"
 
 #include <vector>
 #include <map>
@@ -25,7 +26,7 @@
 using namespace llvm;
 using namespace std;
 
-#define DEBUG 1
+#define DEBUG 0
 #define INLINE 0
 #define INJECT 1
 #define FALSE 0
@@ -36,9 +37,9 @@ using namespace std;
 #define FIBER_CREATE 3
 #define IDLE_FIBER_ROUTINE 4
 
-#define GRAN 892
+#define GRAN 200
 #define CALL_GUARDS 0
-#define LOOP_GUARDS 0
+#define LOOP_GUARDS 1
 
 #define FREQUENCY 25
 
@@ -120,6 +121,8 @@ struct CAT : public ModulePass
                 return false;
         }
 
+        bool stripped = StripDebugInfo(M);
+
 #if INJECT
         // Force inlining of nk_fiber_yield (should only occur in wrapper_nk_fiber_yield)
         inlineF(DI, *(FIBERS[INNER_YIELD]));
@@ -181,6 +184,8 @@ struct CAT : public ModulePass
              * SETUP --- Keep BasicBlocks stored as a vector of pointers and a map to an ID --- useful
              * to compute the adjusted control flow graph (that uses SparseBitVectors and set differences)
              */
+
+            // stripDebugInfo(*routine);
 
             vector<BasicBlock *> BasicBlocks;
             map<BasicBlock *, uint64_t> BBIDs;
@@ -907,16 +912,29 @@ struct CAT : public ModulePass
             break;
         case Instruction::Call:
         {
+            // **** POSSIBLE BUG ****
+            /*
             if (auto *call = dyn_cast<CallInst>(I)) // don't want to involve LLVM internals
             {
                 Function *callee = call->getCalledFunction();
                 if (callee != nullptr)
                 {
                     if (callee->isIntrinsic())
+                    {
+                        call->print(errs());
+                        errs() << "\n";
                         cost = 0;
+                    }
+                    else
+                        cost = 100;
                 }
+                else
+                    cost = 100;
             }
+            */
+
             cost = 100;
+
             break;
         }
         default:
@@ -968,6 +986,30 @@ struct CAT : public ModulePass
         }
 
         return;
+    }
+
+    void stripDebugInfo(Function &F)
+    {
+        vector<Instruction *> DebugInstructions;
+
+        for (auto &B : F)
+        {
+            for (auto &I : B)
+            {
+                if (auto *call = dyn_cast<CallInst>(&I))
+                {
+                    Function *callee = call->getCalledFunction();
+                    if (callee != nullptr)
+                    {
+                        if (callee->getName().startswith("llvm.dbg"))
+                            DebugInstructions.push_back(&I);
+                    }
+                }
+            }
+        }
+
+        for (auto DI : DebugInstructions)
+            DI->eraseFromParent();
     }
 
     /*

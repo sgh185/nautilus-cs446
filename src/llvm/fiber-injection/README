@@ -1,3 +1,17 @@
+NEW
+*** Pass that injects calls to "wrapper_nk_fiber_yield" based on a data flow analysis that calcualtes expected and maximum latencies of instructions in a module *** 
+
+Data Flow Analysis : TODO
+
+Technical Issues : TODO
+
+Conceptual Issues :
+- How to measure expected and maximum latencies of loops with unknown tripCounts. These will be peeled partially, but how should maximum and expected latencies of all successor blocks/instructions change?
+- Grouping injected calls that are placed "too close to each other" because of discrepancies between expected and maximum latencies. Could be grouped using branch instructions --- but that adds overhead.
+
+---------------
+
+OLD 
 *** Basic pass to insert and inline the "nk_fiber_yield" function call every 25 lines of code. *** 
 
 Technical issues:
