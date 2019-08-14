@@ -4,18 +4,18 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Type.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/SparseBitVector.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/Cloning.h"
-#include "llvm/IR/DebugInfo.h"
 
 #include <vector>
 #include <set>
@@ -223,7 +223,7 @@ struct CAT : public ModulePass
             // NOTE: Need a successor graph to generate injection locations
             set<Instruction *> InjectionLocations;
 
-            markInjectionLocationsFromLatencies(&(routine->getEntryBlock()), ExpLatencies, MaxLatencies, AS, BasicBlocks, 0, 0, InjectionLocations);
+            markInjectionLocationsFromLatencies(*routine, ExpLatencies, MaxLatencies, AP, BasicBlocks, InjectionLocations);
             markGuardLocations(*routine, LoopTerminators, InjectionLocations);
 
             /*
@@ -245,7 +245,7 @@ struct CAT : public ModulePass
             }
 
             errs() << "\n\n\n\n\nBackEdges\n";
-            for (auto const &[BB, sbv] : BackEdges)
+            for (auto const &[BB, sbv] : BackEdgesPredecessors)
             {
                 errs() << "\n\nCurr frontInst: ";
                 BB->front().print(errs());
@@ -286,7 +286,7 @@ struct CAT : public ModulePass
             }
 
             errs() << "\n\n\n\n\nBackEdgeSuccessors\n";
-            for (auto const &[BB, sbv] : BackEdgeSuccessors)
+            for (auto const &[BB, sbv] : BackEdgesSuccessors)
             {
                 errs() << "\n\nCurr frontInst: ";
                 BB->front().print(errs());
@@ -531,7 +531,6 @@ struct CAT : public ModulePass
                 for (auto BBID : adjustedPredecessors[currBlock])
                 {
                     BasicBlock *realPred = BasicBlocks[BBID];
-                    adjustedPredBB.push_back(realPred);
                     Instruction *realPredTerminator = realPred->getTerminator();
 
                     /* 
@@ -546,6 +545,8 @@ struct CAT : public ModulePass
                         readyToCompute = false;
                         break;
                     }
+
+                    adjustedPredBB.push_back(realPred);
                 }
             }
 
@@ -591,6 +592,10 @@ struct CAT : public ModulePass
              * then maximum and expected latencies of the first instruction to the current 
              * block will be found using GEN[frontInst] 
              */
+
+            EXP[frontInst] = frontLatency;
+            MAX[frontInst] = frontLatency;
+
             if (adjustedPredBB.size() > 0)
             {
                 for (auto predBB : adjustedPredBB)
@@ -603,14 +608,8 @@ struct CAT : public ModulePass
                     // IN[frontInst] = max(OUT[all predInst to frontInst]) --- take max later
                     predInstMaxLatencies.push_back(MAX[terminatorPredInst]);
                 }
-
-                EXP[frontInst] = (EXP[frontInst] / adjustedPredBB.size()) + frontLatency;
-                MAX[frontInst] = *max_element(predInstMaxLatencies.begin(), predInstMaxLatencies.end()) + frontLatency;
-            }
-            else
-            {
-                EXP[frontInst] = frontLatency;
-                MAX[frontInst] = frontLatency;
+                EXP[frontInst] = (EXP[frontInst] / adjustedPredBB.size());
+                MAX[frontInst] += *max_element(predInstMaxLatencies.begin(), predInstMaxLatencies.end());
             }
 
             // Propagate the maximum and expected latency of the first instruction through the current block
@@ -645,6 +644,8 @@ struct CAT : public ModulePass
     /*
      * Finding Injection Locations ---
      * Computes the locations to inject a yield call based on the specific constraints:
+     * - Uses a pseudo worklist algorithm to calculate based on data flow analysis similar to
+     *   the analysis to calculate maximum and expected latencies (breadth first, mergers)
      * - Each call instruction is assumed to have high latency --- inject yield before and after
      *   call instruction (markGuardLocations)
      * - Identify first instruction in func that has an EXPECTED latency that exceeds X. Inject
@@ -656,48 +657,103 @@ struct CAT : public ModulePass
      *   maximum latency (future optimiztion) (markGuardLocations)
      */
 
-    // ************ NEEDS MAJOR REFACTORING (RECURSION + LARGE STACK) ************
-    void markInjectionLocationsFromLatencies(BasicBlock *B,
+    // ************ NEEDS MAJOR REFACTORING (WORKLIST + LARGE STACK) ************
+
+    void markInjectionLocationsFromLatencies(Function &F,
                                              unordered_map<Instruction *, double> &EXP,
                                              unordered_map<Instruction *, double> &MAX,
-                                             unordered_map<BasicBlock *, SparseBitVector<>> &AS,
+                                             unordered_map<BasicBlock *, SparseBitVector<>> &AP,
                                              vector<BasicBlock *> &BasicBlocks,
-                                             double lastEXPHit,
-                                             double lastMAXHit,
                                              set<Instruction *> &IL)
     {
-        double newLastEXPHit = lastEXPHit;
-        double newLastMAXHit = lastMAXHit;
+        unordered_map<BasicBlock *, double> LastEXPHits;
+        unordered_map<BasicBlock *, double> LastMAXHits;
 
-        for (auto &I : *B)
+        queue<BasicBlock *> latencyWorkList;
+
+        for (auto &B : F)
+            latencyWorkList.push(&B);
+
+        while (!latencyWorkList.empty())
         {
-            if (isa<PHINode>(&I)) // Cannot inject in PHI Node block --- breaks LLVM invariant
+            BasicBlock *currBlock = latencyWorkList.front();
+            latencyWorkList.pop();
+
+            vector<double> predEXPHits;
+            vector<double> predMAXHits;
+            bool readyToCompute = true;
+
+            // Check if the currBlock is ready for marking injection locations
+            if (AP.find(currBlock) != AP.end())
+            {
+                for (auto BBID : AP[currBlock])
+                {
+                    BasicBlock *realPred = BasicBlocks[BBID];
+
+                    /* 
+                    If expected or maximum latencies of the predecessor blocks don't exist (i.e. 
+                    if no entries exist for the first instruction) --- then this block is not ready
+                    for computation. Push back to the workList and continue.
+                    */
+
+                    if (LastEXPHits.find(realPred) == LastEXPHits.end() ||
+                        LastMAXHits.find(realPred) == LastMAXHits.end())
+                    {
+                        readyToCompute = false;
+                        break;
+                    }
+
+                    predEXPHits.push_back(LastEXPHits[realPred]);
+                    predMAXHits.push_back(LastMAXHits[realPred]);
+                }
+            }
+
+            if (!readyToCompute)
+            {
+                latencyWorkList.push(currBlock);
                 continue;
-
-            // Find injection locations based on expected latencies
-            if ((EXP[&I] - newLastEXPHit) > GRAN)
-            {
-                IL.insert(&I);
-                newLastEXPHit = EXP[&I];
             }
 
-            // Find injection locations based on maximum latencies
-            if ((MAX[&I] - newLastMAXHit) > GRAN)
+            // ----
+
+            double newLastEXPHit = 0.0, newLastMAXHit = 0.0;
+
+            if (predEXPHits.size() > 0)
             {
-                IL.insert(&I);
-                newLastMAXHit = MAX[&I];
+                double minPredEXPHit = *min_element(predEXPHits.begin(), predEXPHits.end());
+                newLastEXPHit = minPredEXPHit;
             }
+
+            if (predMAXHits.size() > 0)
+            {
+                double maxPredMAXHit = *max_element(predMAXHits.begin(), predMAXHits.end());
+                newLastMAXHit = maxPredMAXHit;
+            }
+
+            for (auto &I : *currBlock)
+            {
+                if (isa<PHINode>(&I)) // Cannot inject in PHI Node block --- breaks LLVM invariant
+                    continue;
+
+                // Find injection locations based on expected latencies
+                if ((EXP[&I] - newLastEXPHit) > GRAN)
+                {
+                    IL.insert(&I);
+                    newLastEXPHit = EXP[&I];
+                }
+
+                if ((MAX[&I] - newLastMAXHit) > GRAN)
+                {
+                    IL.insert(&I);
+                    newLastMAXHit = MAX[&I];
+                }
+            }
+
+            LastEXPHits[currBlock] = newLastEXPHit;
+            LastMAXHits[currBlock] = newLastMAXHit;
         }
 
-        /*
-        Depth first --- Each path down the adjusted successors (CFG) through the exiting block(s) is treated
-        separately. Injection locations along these paths will be marked recursively (based on expected and 
-        maximum latencies)
-        */
-
-        // ************ NEEDS MAJOR REFACTORING (RECURSION + LARGE STACK) ************
-        for (auto ID : AS[B])
-            markInjectionLocationsFromLatencies(BasicBlocks[ID], EXP, MAX, AS, BasicBlocks, newLastEXPHit, newLastMAXHit, IL);
+        return;
     }
 
     void markGuardLocations(Function &F,
@@ -912,6 +968,7 @@ struct CAT : public ModulePass
     void injectYield(Function &F, Function *funcToInsert, set<Instruction *> &IL)
     {
         // Build CallInst to yield, insert into routine
+
         for (auto i : IL)
         {
 #if DEBUG
@@ -922,7 +979,6 @@ struct CAT : public ModulePass
             // Inject yield call
             IRBuilder<> builder{i};
             CallInst *yieldCall = builder.CreateCall(funcToInsert, None);
-            yieldCall->setDebugLoc(i->getDebugLoc()); // Fix lost dbg metadata
 
 #if DEBUG
             errs() << "yieldCall CallInst: ";
