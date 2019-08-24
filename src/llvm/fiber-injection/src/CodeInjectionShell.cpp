@@ -1,3 +1,36 @@
+/*
+ * This file is part of the Nautilus AeroKernel developed
+ * by the Hobbes and V3VEE Projects with funding from the 
+ * United States National  Science Foundation and the Department of Energy.  
+ *
+ * The V3VEE Project is a joint project between Northwestern University
+ * and the University of New Mexico.  The Hobbes Project is a collaboration
+ * led by Sandia National Laboratories that includes several national 
+ * laboratories and universities. You can find out more at:
+ * http://www.v3vee.org  and
+ * http://xstack.sandia.gov/hobbes
+ *
+ * Copyright (c) 2019, Souradip Ghosh <sgh@u.northwestern.edu>
+ * Copyright (c) 2019, Simone Campanoni <simonec@eecs.northwestern.edu>
+ * Copyright (c) 2019, Peter A. Dinda <pdinda@northwestern.edu>
+ * Copyright (c) 2019, The V3VEE Project  <http://www.v3vee.org> 
+ *                     The Hobbes Project <http://xstack.sandia.gov/hobbes>
+ * All rights reserved.
+ *
+ * Authors: Souradip Ghosh <sgh@u.northwestern.edu>
+ *          Simone Campanoni <simonec@eecs.northwestern.edu>
+ *          Peter A. Dinda <pdinda@northwestern.edu>
+ *
+ * This is free software.  You are permitted to use,
+ * redistribute, and modify it as specified in the file "LICENSE.txt".
+ */
+
+/*
+ * Transformation that injects calls to a wrapper for fiber yield function ("wrapper_nk_fiber_yield")
+ * based on a data flow analysis that calcualtes expected and/or maximum latencies of bitcode 
+ * instructions in a module
+ */
+
 #include "llvm/Pass.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Analysis/CFG.h"
@@ -16,32 +49,56 @@
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
+#include "llvm/IR/Dominators.h"
+#include "llvm/Transforms/Utils/LoopUtils.h"
+#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Transforms/Utils/UnrollLoop.h"
+#include "llvm/Transforms/Utils/LoopSimplify.h"
+#include "llvm/Analysis/AssumptionCache.h"
+#include "llvm/Analysis/ScalarEvolution.h"
+#include "llvm/Analysis/ScalarEvolutionExpressions.h"
 
 #include <vector>
 #include <set>
 #include <unordered_map>
 #include <queue>
+#include <algorithm>
+#include <cstdlib>
 
 using namespace llvm;
 using namespace std;
 
+// Pass settings
 #define DEBUG 0
 #define INLINE 0
 #define INJECT 1
 #define FALSE 0
 
+// Fiber functions
 #define WRAPPER_YIELD 0
 #define INNER_YIELD 1
 #define FIBER_START 2
 #define FIBER_CREATE 3
 #define IDLE_FIBER_ROUTINE 4
 
+// Guards for yield call injections
 #define GRAN 200
 #define CALL_GUARDS 0
-#define LOOP_GUARDS 1
+#define LOOP_GUARDS 0
 
-#define FREQUENCY 25
+// Conservativeness, Latency path configurations
+#define MAXIMUM 0
+#define EXPECTED 1
 
+#define HIGHCON 0
+#define MEDCON 1
+#define LOWCON 2
+
+#define CONSERV HIGHCON
+#define LATCONFIG EXPECTED
+
+// Fiber function declarations
 const vector<uint32_t> NK_ids = {WRAPPER_YIELD, INNER_YIELD, FIBER_START, FIBER_CREATE, IDLE_FIBER_ROUTINE};
 const vector<string> NK_names = {"wrapper_nk_fiber_yield", "nk_fiber_yield", "nk_fiber_start", "nk_fiber_create", "__nk_fiber_idle"};
 unordered_map<uint32_t, Function *> FIBERS;
@@ -82,7 +139,7 @@ struct CAT : public ModulePass
 #endif
         /*
         - Function is not ready to be transformed at this point, metadata is not set
-        - Other transformations from the clang command (most likely -fgnu89-inline) modifies
+        - Other transformations from the clang command (most likely -fgnu89-inline or -O2) modifies
           the bitcode in a way that keeping a pointer to wrapper_nk_fiber_yield may not contain
           the same info seen in doInitialization to the info seen in runOnModule
         */
@@ -103,7 +160,7 @@ struct CAT : public ModulePass
 #if FALSE
         return false;
 #endif
-        // Find fiber_functions again --- here, it's safe to transform, granted it has not been discarded
+        // Find fiber_functions again --- safe to transform here, granted functions not discarded
         for (auto i : NK_ids)
         {
             auto func = M.getFunction(NK_names[i]);
@@ -113,7 +170,7 @@ struct CAT : public ModulePass
                 return false;
         }
 
-        // Get rid of LLVM internals/intrinsics
+        // Get rid of LLVM debug intrinsics
         StripDebugInfo(M);
 
 #if INJECT
@@ -159,71 +216,52 @@ struct CAT : public ModulePass
 
 #if INJECT
         // IDENTIFY ROUTINES
-        set<Function *> FiberRoutines = identifyRoutines(DI, M, FIBERS[FIBER_CREATE]);
+        set<Function *> FiberRoutines = identifyRoutines(M, FIBERS[FIBER_CREATE]);
 #endif
 
 #if DEBUG
         for (auto routine : FiberRoutines)
             DI->RoutineNames.push_back(routine->getName());
 #endif
-        // INJECTION --- The following will determine where to inject calls, and inject properly for each routine
+        // INJECTION --- Determine where to inject calls, inject properly for each routine
         for (auto routine : FiberRoutines)
         {
-
 #if DEBUG
             errs() << "\n\n\n\n\n\n\nCURR FUNCTION:\n " << routine->getName() << "\n";
 #endif
             /*
-             * SETUP --- Keep BasicBlocks stored as a vector of pointers and a map to an ID --- useful
-             * to compute the adjusted control flow graph (that uses SparseBitVectors and set differences)
+             * SETUP --- Optimize loops for the injection pass. Unroll loops such that total loop
+             * latency size matches a multiple of the granularity --- now injection in loop blocks 
+             * are possible in intervals determined by the granularity
              */
 
-            vector<BasicBlock *> BasicBlocks;
-            unordered_map<BasicBlock *, uint64_t> BBIDs;
-
-            uint32_t id = 0;
-            for (auto &B : *routine)
-            {
-                BasicBlocks.push_back(&B);
-                BBIDs[&B] = id;
-                id++;
-            }
+            findAndSetLoops(*routine);
+            errs() << "GOT HERE\n";
 
             /*
-            * GENERATE LATENCY CALCULATIONS --- a pseudo data flow analysis to compute expected
-            * and maximum latency for each instruction of the function (based on CMU data --- naive)
+            * GENERATE LATENCY CALCULATIONS --- a data flow analysis to compute expected 
+            * and/or maximum latency for each bitcode instruction of the function (based on 
+            * bitcode latency data). An adjusted control flow graph is needed to compute these
+            * values --- back edges in functions are excluded (currently using FindFunctionBackedges
+            * API instead of dominator tree)
             */
 
-            /*
-            NOTE: Need adjusted predecessors (i.e. CFG) to generate latencies --- CFG that disregards 
-            loop backedges in a routine and allows expected and max latency calculations based on 
-            terminator instructions of predecessors
-            */
-
+            // Isolate function back edges
+            unordered_map<BasicBlock *, set<BasicBlock *>> BackEdges;
             set<Instruction *> LoopTerminators;
-            unordered_map<BasicBlock *, SparseBitVector<>> BackEdgesPredecessors;
-            unordered_map<BasicBlock *, SparseBitVector<>> BackEdgesSuccessors;
-            findBackEdges(*routine, BBIDs, LoopTerminators, BackEdgesPredecessors, BackEdgesSuccessors);
-
-            unordered_map<BasicBlock *, SparseBitVector<>> AP;
-            unordered_map<BasicBlock *, SparseBitVector<>> AS;
-            genAdjustedCFG(*routine, BackEdgesPredecessors, BackEdgesSuccessors, BBIDs, AP, AS);
+            organizeFunctionBackedges(*routine, BackEdges, LoopTerminators);
 
             // Latency calculations
-            unordered_map<Instruction *, double> ExpLatencies;
-            unordered_map<Instruction *, double> MaxLatencies;
-            calculateLatencies(*routine, AP, ExpLatencies, MaxLatencies, BasicBlocks);
+            unordered_map<Instruction *, double> LatencyMeasurements;
+            calculateLatencies(*routine, BackEdges, LatencyMeasurements);
 
             /*
-            * FIND INJECTION LOCATIONS --- determine where to inject yield calls based on expected and 
-            * maximum latency, given a granularity value X (a macro for now). Specifics are found
+            * FIND INJECTION LOCATIONS --- determine where to inject yield calls based on expected and/or 
+            * maximum latency, given a granularity value X (macro for now). Specifics are found
             * in the description for findInjectionLocations
             */
-
-            // NOTE: Need a successor graph to generate injection locations
             set<Instruction *> InjectionLocations;
-
-            markInjectionLocationsFromLatencies(*routine, ExpLatencies, MaxLatencies, AP, BasicBlocks, InjectionLocations);
+            markInjectionLocationsFromLatencies(*routine, LatencyMeasurements, BackEdges, InjectionLocations);
             markGuardLocations(*routine, LoopTerminators, InjectionLocations);
 
             /*
@@ -243,18 +281,19 @@ struct CAT : public ModulePass
                 errs() << "Basic Block that contains the back-edge\n";
                 Edges[i].second->print(errs());
             }
+            errs() << "GOT HERE6\n";
 
             errs() << "\n\n\n\n\nBackEdges\n";
-            for (auto const &[BB, sbv] : BackEdgesPredecessors)
+            for (auto const &[BB, s] : BackEdges)
             {
                 errs() << "\n\nCurr frontInst: ";
                 BB->front().print(errs());
                 errs() << "\n";
 
                 errs() << "Now Back Edges: \n";
-                for (auto id : sbv)
+                for (auto b : s)
                 {
-                    BasicBlocks[id]->front().print(errs());
+                    b->front().print(errs());
                     errs() << "\n";
                 }
             }
@@ -272,34 +311,6 @@ struct CAT : public ModulePass
                 }
             }
 
-            errs() << "\n\n\nOnly Adjusted Predecessors";
-            for (auto const &[BB, s] : AP)
-            {
-                errs() << "\n\n\nCurr Front Instruction :\n";
-                BB->front().print(errs());
-                errs() << "\nNow Predecessors:\n";
-                for (auto predID : s)
-                {
-                    BasicBlocks[predID]->front().print(errs());
-                    errs() << "\n\n";
-                }
-            }
-
-            errs() << "\n\n\n\n\nBackEdgeSuccessors\n";
-            for (auto const &[BB, sbv] : BackEdgesSuccessors)
-            {
-                errs() << "\n\nCurr frontInst: ";
-                BB->front().print(errs());
-                errs() << "\n";
-
-                errs() << "Now Back Edges: \n";
-                for (auto id : sbv)
-                {
-                    BasicBlocks[id]->front().print(errs());
-                    errs() << "\n";
-                }
-            }
-
             errs() << "\n\n\nOnly Successors";
             for (auto &B : *routine)
             {
@@ -313,36 +324,12 @@ struct CAT : public ModulePass
                 }
             }
 
-            errs() << "\n\n\nOnly Adjusted Successors";
-            for (auto const &[BB, s] : AS)
-            {
-                errs() << "\n\n\nCurr Front Instruction :\n";
-                BB->front().print(errs());
-                errs() << "\nNow AdjSuccessors:\n";
-                for (auto succID : s)
-                {
-                    BasicBlocks[succID]->front().print(errs());
-                    errs() << "\n\n";
-                }
-            }
-
-            errs() << "\n\n\nEXPECTED LATENCIES\n";
+            errs() << "\n\n\ LATENCIES\n";
             for (auto &B : *routine)
             {
                 for (auto &I : B)
                 {
-                    errs() << ExpLatencies[&I] << "   :    ";
-                    I.print(errs());
-                    errs() << "\n";
-                }
-            }
-
-            errs() << "\n\n\nMAXIMUM LATENCIES\n";
-            for (auto &B : *routine)
-            {
-                for (auto &I : B)
-                {
-                    errs() << MaxLatencies[&I] << "   :    ";
+                    errs() << LatencyMeasurements[&I] << "   :    ";
                     I.print(errs());
                     errs() << "\n";
                 }
@@ -357,6 +344,7 @@ struct CAT : public ModulePass
             }
 #endif
         }
+        return false;
 
 #if INLINE
         // INLINING --- inline the wrapper_nk_fiber_yield, inline all routines
@@ -384,7 +372,8 @@ struct CAT : public ModulePass
      * 
      */
 
-    set<Function *> identifyRoutines(debugInfo *DI, Module &M, Function *parentFuncToFind)
+    set<Function *> identifyRoutines(Module const &M,
+                                     Function const *parentFuncToFind)
     {
         set<Function *> Routines;
 
@@ -407,109 +396,194 @@ struct CAT : public ModulePass
         return Routines;
     }
 
+    // ========================= LOOP SETTING =========================
+
+    void findAndSetLoops(Function &F)
+    {
+        auto &LI = getAnalysis<LoopInfoWrapperPass>(F).getLoopInfo();
+        auto &DT = getAnalysis<DominatorTreeWrapperPass>(F).getDomTree();
+        auto &SE = getAnalysis<ScalarEvolutionWrapperPass>(F).getSE();
+        auto &AC = getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
+        OptimizationRemarkEmitter ORE(&F);
+
+        // Adjust loops for UnrollLoop API
+        for (auto l : LI)
+        {
+            auto L = &*l;
+            formLCSSARecursively(*L, DT, &LI, &SE);
+            simplifyLoop(L, &DT, &LI, &SE, &AC, true);
+        }
+
+        /*
+         * Depth first --- transform loops (and subloops) to a total latency size
+         * that is a multiple of the granularity
+         */
+        for (auto L : LI)
+        {
+            vector<Loop *> SLs = L->getSubLoops();
+            for (auto SL : SLs)
+                transformLoop(LI, SL, DT, SE, AC, ORE, calculatePrelimLoopLatencySize(F, LI, SL));
+
+            transformLoop(LI, L, DT, SE, AC, ORE, calculatePrelimLoopLatencySize(F, LI, L));
+        }
+
+        return;
+    }
+
+    void transformLoop(LoopInfo &LI, Loop *L,
+                       DominatorTree &DT, ScalarEvolution &SE,
+                       AssumptionCache &AC, OptimizationRemarkEmitter &ORE,
+                       double size)
+    {
+        uint64_t count = getUnrollCount(size);
+
+        if (L->isLoopSimplifyForm() && L->isLCSSAForm(DT))
+        {
+            auto tripCount = SE.getSmallConstantTripCount(L);
+            auto tripMultiple = SE.getSmallConstantTripMultiple(L);
+
+            auto unrollCount = count;
+            auto peelCount = 0;
+
+            // For loops with an unknown trip count, set peelCount instead
+            if (!tripCount)
+            {
+                peelCount = count;
+                unrollCount = 2;
+            }
+
+            auto forceUnroll = false;
+            auto allowRuntime = true;
+            auto allowExpensiveTripCount = false;
+            auto preserveCondBr = false;
+            auto preserveOnlyFirst = false;
+
+            LoopUnrollResult unrolled = UnrollLoop(L, unrollCount, tripCount,
+                                                   forceUnroll, allowRuntime, allowExpensiveTripCount,
+                                                   preserveCondBr, preserveOnlyFirst, tripMultiple,
+                                                   peelCount, false, &LI, &SE, &DT, &AC, &ORE, true);
+
+            if (unrolled == LoopUnrollResult::FullyUnrolled || unrolled == LoopUnrollResult::PartiallyUnrolled)
+                errs() << "\nUNROLLED SUCCESSFULLY\n";
+        }
+
+        return;
+    }
+
+    double calculatePrelimLoopLatencySize(Function &F, LoopInfo &LI, Loop *L)
+    {
+        queue<BasicBlock *> workList;
+        unordered_map<BasicBlock *, bool> visited;
+        unordered_map<BasicBlock *, pair<double, double>> latencyMeasurements;
+
+        unordered_map<BasicBlock *, set<BasicBlock *>> BackEdges;
+        set<Instruction *> LoopTerminators;
+        organizeFunctionBackedges(F, BackEdges, LoopTerminators);
+
+        for (auto B = L->block_begin(); B != L->block_end(); ++B)
+        {
+            visited[*B] = false;
+            workList.push(*B);
+        }
+
+        while (!workList.empty())
+        {
+            BasicBlock *currBlock = workList.front();
+            workList.pop();
+
+            vector<double> predBBLatencies;
+            bool readyToCompute = true;
+
+            for (auto predBB : predecessors(currBlock))
+            {
+                if (isBackEdge(predBB, currBlock, BackEdges) || !(L->contains(predBB)))
+                    continue;
+
+                if (!visited[predBB])
+                {
+                    readyToCompute = false;
+                    break;
+                }
+
+                predBBLatencies.push_back(latencyMeasurements[predBB].second);
+            }
+
+            if (!readyToCompute)
+            {
+                workList.push(currBlock);
+                continue;
+            }
+
+            double frontLatency = getLatency(&(currBlock->front()));
+            if (predBBLatencies.size() > 0)
+                frontLatency += configLatencyCalculation(predBBLatencies);
+
+            double propagatingLatency = frontLatency;
+            for (auto iter = ++currBlock->begin(); iter != currBlock->end(); ++iter)
+                propagatingLatency += getLatency(&*iter);
+
+            pair<double, double> frontAndTerminator;
+            frontAndTerminator.first = frontLatency;
+            frontAndTerminator.second = propagatingLatency;
+
+            latencyMeasurements[currBlock] = frontAndTerminator;
+            visited[currBlock] = true;
+        }
+
+        BasicBlock *loopFront = *(L->block_begin());
+        BasicBlock *loopEnd = getLastLoopBlock(L);
+
+        return (latencyMeasurements[loopEnd].second - latencyMeasurements[loopFront].first);
+    }
+
+    // ========================= PREPARE INJECTION LOCATIONS =========================
+
     /*
-     * findBackEdges --- (REFACTORED)
+     * organizeFunctionBackedges --- (REFACTORED)
      * Tracks all back edges that exist in a routine in a bit vector 
      * structure. Applies the FindFunctionBackedges API --- and converts the structure of the  result
-     * so that each backedge BasicBlock maps to a bit vector of predecessor/successor basic blocks based 
-     * on the backedges found by FindFunctionBackedges. Function also fills out the LoopTerminators
-     * set to be used by findInjectionLocations.
+     * so that each source BasicBlock maps to a set of destination basic blocks based on FindFunctionBackedges. 
+     * Function also fills out the LoopTerminators. Set to be used by findInjectionLocations.
      */
 
-    void findBackEdges(Function &F,
-                       unordered_map<BasicBlock *, uint64_t> IDs,
-                       set<Instruction *> &LT,
-                       unordered_map<BasicBlock *, SparseBitVector<>> &BEP,
-                       unordered_map<BasicBlock *, SparseBitVector<>> &BES)
+    void organizeFunctionBackedges(Function &F,
+                                   unordered_map<BasicBlock *, set<BasicBlock *>> &BackEdges,
+                                   set<Instruction *> &LT)
     {
-        // Takes FindFunctionBackedges API result --- reorganizes it for this pass
         SmallVector<pair<const BasicBlock *, const BasicBlock *>, 32> Edges;
         FindFunctionBackedges(F, Edges);
 
-        for (uint64_t i = 0, e = Edges.size(); i != e; ++i)
+        for (uint64_t iter = 0, e = Edges.size(); iter != e; ++iter)
         {
-            BasicBlock *BEBlock = const_cast<BasicBlock *>(Edges[i].first);      // The predecessor (back-edge) block
-            BasicBlock *BEContainer = const_cast<BasicBlock *>(Edges[i].second); // The block that contains a back-edge
-
-            // Insert the block that contains the back-edge --- will contain the last instruction of loop
-            LT.insert(BEContainer->getTerminator());
-
-            // Predecessors
-            if (BEP.find(BEContainer) == BEP.end())
-                BEP[BEContainer] = SparseBitVector<>();
-
-            BEP[BEContainer].set(IDs[BEBlock]);
-
-            // Successors
-            if (BES.find(BEBlock) == BES.end())
-                BES[BEBlock] = SparseBitVector<>();
-
-            BES[BEBlock].set(IDs[BEContainer]);
+            BasicBlock *from = const_cast<BasicBlock *>(Edges[iter].first);
+            BasicBlock *to = const_cast<BasicBlock *>(Edges[iter].second);
+            BackEdges[from].insert(to);
+            LT.insert(to->getTerminator());
         }
-
-        return;
     }
 
     /*
-     * genAdjustedCFG --- (REFACTORED)
-     * Generates a slightly different mapping of predecessors and successors for the BasicBlocks 
-     * in a function. Since the current pass ignores backedges in loops --- the adjustedPredecessors/Successors 
-     * (AP, AS) data structure needs to prevent tracking of backedges. Set difference (using bit vectors) is 
-     * performed to account for thisnuance.
-     */
-
-    void genAdjustedCFG(Function &F,
-                        unordered_map<BasicBlock *, SparseBitVector<>> &BEP,
-                        unordered_map<BasicBlock *, SparseBitVector<>> &BES,
-                        unordered_map<BasicBlock *, uint64_t> &IDs,
-                        unordered_map<BasicBlock *, SparseBitVector<>> &AP,
-                        unordered_map<BasicBlock *, SparseBitVector<>> &AS)
-    {
-        // Generate a pseudo CFG based on successors and predecessors --- all back-edges are removed from the graph
-        for (auto &B : F)
-        {
-            // Predecessors
-            AP[&B] = SparseBitVector<>();
-
-            for (auto predBB : predecessors(&B))
-                AP[&B].set(IDs[predBB]);
-
-            if (BEP.find(&B) != BEP.end())
-                AP[&B] = AP[&B] - BEP[&B];
-
-            // Successors
-            AS[&B] = SparseBitVector<>();
-
-            for (auto succBB : successors(&B))
-                AS[&B].set(IDs[succBB]);
-
-            if (BES.find(&B) != BES.end())
-                AS[&B] = AS[&B] - BES[&B];
-        }
-
-        return;
-    }
-
-    /*
-     * calculateLatencies --- NEEDS REFACTORING ---
+     * calculateLatencies --- (REFACTORED --- NEEDS CODE CLEANUP (repitition with other workList funcs)) ---
      * Calculates expected and maximum latencies for all instructions in a routine. The mechanics
      * of the calculations are described below. calculateLatencies applies an altered worklist 
      * algorithm. All BasicBlocks are considered at initial execution of the algorithm. However, 
      * successors are not considered as there is no fixed point when calculating maximum and 
-     * expected latencies (possible). Instead, the current block is considered IFF expected and 
+     * expected latencies (possible). Instead, the current block is considered IFF expected and/or 
      * maximum latencies exist for the previous block. If not, the block is pushed back to the worklist
      */
 
-    // *** NEEDS REFACTORING ***
     void calculateLatencies(Function &F,
-                            unordered_map<BasicBlock *, SparseBitVector<>> &adjustedPredecessors,
-                            unordered_map<Instruction *, double> &EXP,
-                            unordered_map<Instruction *, double> &MAX,
-                            vector<BasicBlock *> &BasicBlocks)
+                            unordered_map<BasicBlock *, set<BasicBlock *>> BackEdges,
+                            unordered_map<Instruction *, double> &LM)
     {
         queue<BasicBlock *> workList;
+        unordered_map<BasicBlock *, bool> visited;
+
         for (auto &B : F)
+        {
             workList.push(&B);
+            visited[&B] = false;
+        }
 
         while (!workList.empty())
         {
@@ -518,36 +592,25 @@ struct CAT : public ModulePass
             workList.pop();
 
 #if DEBUG
+            errs() << "CurrBLock:\n";
             frontInst->print(errs());
             errs() << "\n";
 #endif
-
-            vector<BasicBlock *> adjustedPredBB;
+            vector<double> predBBLatencies;
             bool readyToCompute = true;
 
-            // Check if the currBlock is ready for calculations
-            if (adjustedPredecessors.find(currBlock) != adjustedPredecessors.end())
+            for (auto predBB : predecessors(currBlock))
             {
-                for (auto BBID : adjustedPredecessors[currBlock])
+                if (isBackEdge(predBB, currBlock, BackEdges))
+                    continue;
+
+                if (!visited[predBB])
                 {
-                    BasicBlock *realPred = BasicBlocks[BBID];
-                    Instruction *realPredTerminator = realPred->getTerminator();
-
-                    /* 
-                    If expected or maximum latencies of the predecessor blocks don't exist (i.e. 
-                    if no entries exist for the first instruction) --- then this block is not ready
-                    for computation. Push back to the workList and continue.
-                    */
-
-                    if (EXP.find(realPredTerminator) == EXP.end() ||
-                        MAX.find(realPredTerminator) == MAX.end())
-                    {
-                        readyToCompute = false;
-                        break;
-                    }
-
-                    adjustedPredBB.push_back(realPred);
+                    readyToCompute = false;
+                    break;
                 }
+
+                predBBLatencies.push_back(LM[predBB->getTerminator()]);
             }
 
             if (!readyToCompute)
@@ -576,45 +639,25 @@ struct CAT : public ModulePass
             */
 
             for (auto &I : *currBlock)
-            {
-                EXP[&I] = 0.0;
-                MAX[&I] = 0.0;
-            }
-
-            // Calculate latency of first instruction to a basic block
-            double frontLatency = getLatency(frontInst); // GEN[frontInst]
-            vector<double> predInstMaxLatencies;
+                LM[&I] = 0.0;
 
             /*
-             * If there are predecessors to this basic block --- maximum and expected 
+             * If there are predecessors to this basic block --- maximum and/or expected 
              * latencies of the first instruction of the current will depend on the maximum and 
              * expected latencies of the terminators of the predecessor basic blocks. If not, 
              * then maximum and expected latencies of the first instruction to the current 
              * block will be found using GEN[frontInst] 
              */
 
-            EXP[frontInst] = frontLatency;
-            MAX[frontInst] = frontLatency;
+            // Calculate latency of first instruction to a basic block
+            double frontLatency = getLatency(frontInst); // GEN[frontInst]
 
-            if (adjustedPredBB.size() > 0)
-            {
-                for (auto predBB : adjustedPredBB)
-                {
-                    Instruction *terminatorPredInst = predBB->getTerminator();
-
-                    // IN[frontInst] = expectedVal(OUT[all predInst to frontInst]) --- divide later
-                    EXP[frontInst] += EXP[terminatorPredInst];
-
-                    // IN[frontInst] = max(OUT[all predInst to frontInst]) --- take max later
-                    predInstMaxLatencies.push_back(MAX[terminatorPredInst]);
-                }
-                EXP[frontInst] = (EXP[frontInst] / adjustedPredBB.size());
-                MAX[frontInst] += *max_element(predInstMaxLatencies.begin(), predInstMaxLatencies.end());
-            }
+            if (predBBLatencies.size() > 0)
+                frontLatency += configLatencyCalculation(predBBLatencies);
 
             // Propagate the maximum and expected latency of the first instruction through the current block
-            auto propagatingEXP = EXP[frontInst];
-            auto propagatingMAX = MAX[frontInst];
+            LM[frontInst] = frontLatency;
+            auto propagatingLatency = LM[frontInst];
 
             for (auto iter = (++currBlock->begin()); iter != currBlock->end(); ++iter)
             {
@@ -623,19 +666,11 @@ struct CAT : public ModulePass
 
                 // OUT[I] = IN[I] + GEN[I]
                 // set propagating vars to new OUT set
-
-                EXP[I] = propagatingEXP + currLatency;
-                propagatingEXP = EXP[I];
-
-                MAX[I] = propagatingMAX + currLatency;
-                propagatingMAX = MAX[I];
+                LM[I] = propagatingLatency + currLatency;
+                propagatingLatency = LM[I];
             }
 
-            /*
-            ************ POTENTIAL BUG ************ 
-            for (auto succBB : successors(currBlock))
-                workList.push(succBB);
-            */
+            visited[currBlock] = true;
         }
 
         return;
@@ -650,7 +685,7 @@ struct CAT : public ModulePass
      *   call instruction (markGuardLocations)
      * - Identify first instruction in func that has an EXPECTED latency that exceeds X. Inject
      *   yield call before that instruction. "Reset" and continue. (markInjectionLocationsFromLatencies)
-     * - Separately, identify first instruction in func that has a MAX latency that exceeds X. Inject
+     * - OR, Identify first instruction in func that has a MAX latency that exceeds X. Inject
      *   yield call before that instruction. "Reset" and continue. (markInjectionLocationsFromLatencies)
      * - If a loop is identified, inject yield call at the end of the loop block (i.e. for each 
      *   iteration). No effort is done to idenfiy how many iterations will exceed X in expected or 
@@ -660,75 +695,52 @@ struct CAT : public ModulePass
     // ************ NEEDS MAJOR REFACTORING (WORKLIST + LARGE STACK) ************
 
     void markInjectionLocationsFromLatencies(Function &F,
-                                             unordered_map<Instruction *, double> &EXP,
-                                             unordered_map<Instruction *, double> &MAX,
-                                             unordered_map<BasicBlock *, SparseBitVector<>> &AP,
-                                             vector<BasicBlock *> &BasicBlocks,
+                                             const unordered_map<Instruction *, double> &LM,
+                                             const unordered_map<BasicBlock *, set<BasicBlock *>> BackEdges,
                                              set<Instruction *> &IL)
     {
-        unordered_map<BasicBlock *, double> LastEXPHits;
-        unordered_map<BasicBlock *, double> LastMAXHits;
+        unordered_map<BasicBlock *, double> LastHits;
+        unordered_map<BasicBlock *, bool> visited;
 
-        queue<BasicBlock *> latencyWorkList;
+        queue<BasicBlock *> workList;
 
         for (auto &B : F)
-            latencyWorkList.push(&B);
-
-        while (!latencyWorkList.empty())
         {
-            BasicBlock *currBlock = latencyWorkList.front();
-            latencyWorkList.pop();
+            workList.push(&B);
+            visited[&B] = false;
+        }
 
-            vector<double> predEXPHits;
-            vector<double> predMAXHits;
+        while (!workList.empty())
+        {
+            BasicBlock *currBlock = workList.front();
+            workList.pop();
+
+            vector<double> predHits;
             bool readyToCompute = true;
 
-            // Check if the currBlock is ready for marking injection locations
-            if (AP.find(currBlock) != AP.end())
+            for (auto predBB : predecessors(currBlock))
             {
-                for (auto BBID : AP[currBlock])
+                if (isBackEdge(predBB, currBlock, BackEdges))
+                    continue;
+
+                if (!visited[predBB])
                 {
-                    BasicBlock *realPred = BasicBlocks[BBID];
-
-                    /* 
-                    If expected or maximum latencies of the predecessor blocks don't exist (i.e. 
-                    if no entries exist for the first instruction) --- then this block is not ready
-                    for computation. Push back to the workList and continue.
-                    */
-
-                    if (LastEXPHits.find(realPred) == LastEXPHits.end() ||
-                        LastMAXHits.find(realPred) == LastMAXHits.end())
-                    {
-                        readyToCompute = false;
-                        break;
-                    }
-
-                    predEXPHits.push_back(LastEXPHits[realPred]);
-                    predMAXHits.push_back(LastMAXHits[realPred]);
+                    readyToCompute = false;
+                    break;
                 }
+
+                predHits.push_back(LastHits[predBB]);
             }
 
             if (!readyToCompute)
             {
-                latencyWorkList.push(currBlock);
+                workList.push(currBlock);
                 continue;
             }
 
-            // ----
-
-            double newLastEXPHit = 0.0, newLastMAXHit = 0.0;
-
-            if (predEXPHits.size() > 0)
-            {
-                double minPredEXPHit = *min_element(predEXPHits.begin(), predEXPHits.end());
-                newLastEXPHit = minPredEXPHit;
-            }
-
-            if (predMAXHits.size() > 0)
-            {
-                double maxPredMAXHit = *max_element(predMAXHits.begin(), predMAXHits.end());
-                newLastMAXHit = maxPredMAXHit;
-            }
+            double updatedLastHit = 0.0;
+            if (predHits.size() > 0)
+                updatedLastHit = configConservativeness(predHits);
 
             for (auto &I : *currBlock)
             {
@@ -736,28 +748,22 @@ struct CAT : public ModulePass
                     continue;
 
                 // Find injection locations based on expected latencies
-                if ((EXP[&I] - newLastEXPHit) > GRAN)
+                if ((LM.at(&I) - updatedLastHit) > GRAN)
                 {
                     IL.insert(&I);
-                    newLastEXPHit = EXP[&I];
-                }
-
-                if ((MAX[&I] - newLastMAXHit) > GRAN)
-                {
-                    IL.insert(&I);
-                    newLastMAXHit = MAX[&I];
+                    updatedLastHit = LM.at(&I);
                 }
             }
 
-            LastEXPHits[currBlock] = newLastEXPHit;
-            LastMAXHits[currBlock] = newLastMAXHit;
+            LastHits[currBlock] = updatedLastHit;
+            visited[currBlock] = true;
         }
 
         return;
     }
 
     void markGuardLocations(Function &F,
-                            set<Instruction *> &LT,
+                            const set<Instruction *> &LT,
                             set<Instruction *> &IL)
     {
 
@@ -794,6 +800,182 @@ struct CAT : public ModulePass
 #endif
 
         return;
+    }
+
+    /*
+     * injectYield
+     * 
+     * Iterates over all fiber routines (from identyRoutines) and marks every 10th bitcode 
+     * instruction as an injection location. Iterate over all those locations to inject a 
+     * call to wrapper_nk_fiber_yield
+     * 
+     */
+
+    void injectYield(Function &F,
+                     Function *funcToInsert,
+                     set<Instruction *> const &IL)
+    {
+        // Build CallInst to yield, insert into routine
+
+        for (auto i : IL)
+        {
+#if DEBUG
+            errs() << "\n\nCurrent instruction from IL: ";
+            i->print(errs());
+            errs() << "\n";
+#endif
+            // Inject yield call
+            IRBuilder<> builder{i};
+            CallInst *yieldCall = builder.CreateCall(funcToInsert, None);
+
+#if DEBUG
+            errs() << "yieldCall CallInst: ";
+            yieldCall->print(errs());
+            errs() << "\n";
+
+            DI->totalInjections++; // debugging info
+#endif
+        }
+
+        return;
+    }
+
+    /*
+     * inlineF
+     * 
+     * Iterate over all the uses of a function (passed as arg), and inline wherever possible
+     * 
+     */
+
+    void inlineF(debugInfo *DI,
+                 Function &F)
+    {
+        vector<CallInst *> CIToIterate;
+        InlineFunctionInfo IFI;
+
+#if DEBUG
+        errs() << "Function: " << F.getName() << "\n";
+        F.print(errs());
+        errs() << "\n";
+#endif
+
+        for (auto &use : F.uses())
+        {
+            User *user = use.getUser();
+
+#if DEBUG
+            errs() << "Current User: ";
+            user->print(errs());
+            errs() << "\n";
+#endif
+
+            if (auto *call = dyn_cast<CallInst>(user))
+            {
+#if DEBUG
+                errs() << "Call to push back: \n";
+                call->print(errs());
+#endif
+                CIToIterate.push_back(call);
+            }
+        }
+
+        for (auto CI : CIToIterate)
+        {
+#if DEBUG
+            errs() << "Current CI: ";
+            CI->print(errs());
+            errs() << "\n";
+#endif
+
+            auto inlined = InlineFunction(CI, IFI);
+            if (!inlined)
+            {
+
+#if DEBUG
+                errs() << "Didn't inline --- failed at the following CI: \n";
+                CI->print(errs());
+                errs() << "\n";
+                errs() << "INLINED failure message is: " << inlined.message << "\n";
+                DI->failedInlines[CI] = inlined.message;
+                // DI->numFailedInlines++;
+#endif
+
+                abort();
+            }
+#if DEBUG
+            else
+            {
+                // DI->totalInlines++;
+                errs() << "**** Successful Inline ****\n";
+            }
+#endif
+        }
+        return;
+    }
+
+    void printDebugInfo(debugInfo *DI)
+    {
+        errs() << "\n\n\nDEBUGGING INFO\n";
+        errs() << "Total Lines: " << DI->totalLines << "\n";
+        errs() << "Total Injections: " << DI->totalInjections << "\n";
+        // for (auto IL : DI->InjectionLocations)
+        // {
+        //     errs() << "Injection Location: ";
+        //     IL->print(errs());
+        //     errs() << "\n";
+        // }
+
+        // errs() << "Total Inlines: " << DI->totalInlines << "\n";
+        // errs() << "Total Failed Inlines: " << DI->numFailedInlines << "\n";
+
+        // DI->initNumCallsToYield = DI->InitCallsToYield.size();
+        // errs() << "Initial Number of Calls To Yield: " << DI->initNumCallsToYield << "\n";
+
+        // if (DI->totalInlines == 0)
+        // {
+        //     errs() << "All initial calls to yield:\n";
+        //     for (auto call : DI->InitCallsToYield)
+        //     {
+        //         errs() << "Call: ";
+        //         call->print(errs());
+        //         errs() << "\n";
+        //     }
+        // }
+
+        errs() << "Routines found: \n";
+        for (auto name : DI->RoutineNames)
+            errs() << name << "\n";
+
+        return;
+    }
+
+    // ===================================== HELPER FUNCTIONS =====================================
+    double configConservativeness(vector<double> &PL)
+    {
+        switch (CONSERV)
+        {
+        case HIGHCON:
+            return *min_element(PL.begin(), PL.end());
+        case MEDCON:
+            return (accumulate(PL.begin(), PL.end(), 0.0) / PL.size());
+        case LOWCON:
+            return *max_element(PL.begin(), PL.end());
+        default:
+            abort();
+        }
+    }
+
+    double configLatencyCalculation(vector<double> &PL)
+    {
+        switch (LATCONFIG)
+        {
+        case EXPECTED:
+            return (accumulate(PL.begin(), PL.end(), 0.0) / PL.size());
+        case MAXIMUM:
+            return *max_element(PL.begin(), PL.end());
+        default:
+            abort();
+        }
     }
 
     double getLatency(Instruction *I) // CMU Data (~10 years old)
@@ -956,152 +1138,60 @@ struct CAT : public ModulePass
         return cost;
     }
 
-    /*
-     * injectYield
-     * 
-     * Iterates over all fiber routines (from identyRoutines) and marks every 10th bitcode 
-     * instruction as an injection location. Iterate over all those locations to inject a 
-     * call to wrapper_nk_fiber_yield
-     * 
-     */
-
-    void injectYield(Function &F, Function *funcToInsert, set<Instruction *> &IL)
+    BasicBlock *getLastLoopBlock(Loop *L)
     {
-        // Build CallInst to yield, insert into routine
+        auto B = L->block_begin();
+        BasicBlock *increment = *B;
+        for (; B != L->block_end(); ++B)
+            increment = *B;
 
-        for (auto i : IL)
-        {
-#if DEBUG
-            errs() << "\n\nCurrent instruction from IL: ";
-            i->print(errs());
-            errs() << "\n";
-#endif
-            // Inject yield call
-            IRBuilder<> builder{i};
-            CallInst *yieldCall = builder.CreateCall(funcToInsert, None);
-
-#if DEBUG
-            errs() << "yieldCall CallInst: ";
-            yieldCall->print(errs());
-            errs() << "\n";
-
-            DI->totalInjections++; // debugging info
-#endif
-        }
-
-        return;
+        return increment;
     }
 
-    /*
-     * inlineF
-     * 
-     * Iterate over all the uses of a function (passed as arg), and inline wherever possible
-     * 
-     */
-
-    void inlineF(debugInfo *DI, Function &F)
+    bool isBackEdge(BasicBlock *from,
+                    BasicBlock *to,
+                    const unordered_map<BasicBlock *, set<BasicBlock *>> &BackEdges)
     {
-        vector<CallInst *> CIToIterate;
-        InlineFunctionInfo IFI;
-
-#if DEBUG
-        errs() << "Function: " << F.getName() << "\n";
-        F.print(errs());
-        errs() << "\n";
-#endif
-
-        for (auto &use : F.uses())
+        if (BackEdges.find(from) != BackEdges.end())
         {
-            User *user = use.getUser();
-
-#if DEBUG
-            errs() << "Current User: ";
-            user->print(errs());
-            errs() << "\n";
-#endif
-
-            if (auto *call = dyn_cast<CallInst>(user))
-            {
-#if DEBUG
-                errs() << "Call to push back: \n";
-                call->print(errs());
-#endif
-                CIToIterate.push_back(call);
-            }
+            if (BackEdges.at(from).find(to) != BackEdges.at(from).end())
+                return true;
         }
 
-        for (auto CI : CIToIterate)
-        {
-#if DEBUG
-            errs() << "Current CI: ";
-            CI->print(errs());
-            errs() << "\n";
-#endif
-
-            auto inlined = InlineFunction(CI, IFI);
-            if (!inlined)
-            {
-
-#if DEBUG
-                errs() << "Didn't inline --- failed at the following CI: \n";
-                CI->print(errs());
-                errs() << "\n";
-                errs() << "INLINED failure message is: " << inlined.message << "\n";
-                DI->failedInlines[CI] = inlined.message;
-                // DI->numFailedInlines++;
-#endif
-
-                abort();
-            }
-#if DEBUG
-            else
-            {
-                // DI->totalInlines++;
-                errs() << "**** Successful Inline ****\n";
-            }
-#endif
-        }
-        return;
+        return false;
     }
 
-    void printDebugInfo(debugInfo *DI)
+    uint64_t getUnrollCount(double num)
     {
-        errs() << "\n\n\nDEBUGGING INFO\n";
-        errs() << "Total Lines: " << DI->totalLines << "\n";
-        errs() << "Total Injections: " << DI->totalInjections << "\n";
-        // for (auto IL : DI->InjectionLocations)
-        // {
-        //     errs() << "Injection Location: ";
-        //     IL->print(errs());
-        //     errs() << "\n";
-        // }
+        uint64_t roundedIntNum = roundToNearest((uint64_t)num);
+        uint64_t divisor = (GRAN > roundedIntNum) ? roundedIntNum : GRAN;
+        return (((roundedIntNum * GRAN) / __gcd(roundedIntNum, (uint64_t)GRAN)) / divisor);
+    }
 
-        // errs() << "Total Inlines: " << DI->totalInlines << "\n";
-        // errs() << "Total Failed Inlines: " << DI->numFailedInlines << "\n";
+    uint64_t roundToNearest(uint64_t num)
+    {
+        static int nearest = 25;
 
-        // DI->initNumCallsToYield = DI->InitCallsToYield.size();
-        // errs() << "Initial Number of Calls To Yield: " << DI->initNumCallsToYield << "\n";
+        int moduloHundred = num % 100;
+        unordered_map<int, int> nearestMap; // (difference from num, multiplier)
+        vector<int> differences;
 
-        // if (DI->totalInlines == 0)
-        // {
-        //     errs() << "All initial calls to yield:\n";
-        //     for (auto call : DI->InitCallsToYield)
-        //     {
-        //         errs() << "Call: ";
-        //         call->print(errs());
-        //         errs() << "\n";
-        //     }
-        // }
+        for (int i = 0; i < (100 / nearest); i++)
+        {
+            int difference = abs((moduloHundred - (i * nearest)));
+            nearestMap[difference] = i;
+            differences.push_back(difference);
+        }
 
-        errs() << "Routines found: \n";
-        for (auto name : DI->RoutineNames)
-            errs() << name << "\n";
-
-        return;
+        return ((num - moduloHundred) + (nearestMap[*min_element(differences.begin(), differences.end())] * nearest));
     }
 
     void getAnalysisUsage(AnalysisUsage &AU) const override
     {
+        AU.addRequired<LoopInfoWrapperPass>();
+        AU.addRequired<AssumptionCacheTracker>();
+        AU.addRequired<DominatorTreeWrapperPass>();
+        AU.addRequired<ScalarEvolutionWrapperPass>();
         return;
     }
 }; // namespace

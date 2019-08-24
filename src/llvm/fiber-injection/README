@@ -1,3 +1,8 @@
+*** NEEDS UPDATE ***
+--- Needs readability update (consts, commenting in helper functions).
+--- Needs refactoring to eliminate code repitition (functions that use workList algorithm)
+
+
 NEW
 *** Pass that injects calls to "wrapper_nk_fiber_yield" based on a data flow analysis that calcualtes expected and maximum latencies of instructions in a module *** 
 
