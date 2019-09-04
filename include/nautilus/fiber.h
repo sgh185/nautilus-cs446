@@ -12,6 +12,7 @@
  *
  * Copyright (c) 2019, Michael A. Cuevas <cuevas@u.northwestern.edu>
  * Copyright (c) 2019, Enrico Deiana <ead@u.northwestern.edu>
+ * Copyright (c) 2019, Souradip Ghosh <sgh@u.northwestern.edu>
  * Copyright (c) 2019, Peter A. Dinda <pdinda@northwestern.edu>
  * Copyright (c) 2019, The V3VEE Project  <http://www.v3vee.org> 
  *                     The Hobbes Project <http://xstack.sandia.gov/hobbes>
@@ -42,6 +43,8 @@ extern "C" {
 
 typedef uint64_t nk_stack_size_t;
 typedef struct nk_thread nk_thread_t;
+typedef struct NodeTy Node_t;
+typedef struct TreeNode TreeNode_t;
 #define FIBER_RAND_CPU_FLAG -2
 #define FIBER_CURR_CPU_FLAG -1
 
@@ -101,6 +104,33 @@ typedef struct nk_fiber {
   uint8_t is_done; //indicates whether the fiber is done (for reaping?)
 } nk_fiber_t;
 
+// Linked list implementation for tests
+typedef struct NodeTy
+{
+  uint64_t value;
+  Node_t *next;
+} Node_t;
+
+typedef struct LinkedList
+{
+  Node_t *head;
+  Node_t *tail;
+} List_t;
+
+typedef struct TreeNode
+{
+  uint64_t value;
+  TreeNode_t *left;
+  TreeNode_t *right;
+} TreeNode_t;
+
+typedef struct TreeQueue
+{
+  TreeNode_t **queue;
+  uint64_t head_pos; // Index of first tree node
+  uint64_t tail_pos; // Index of next available entry to add a tree node to queue
+} TreeQueue_t;
+
 // Returns the fiber that is currently running
 nk_fiber_t *nk_fiber_current();
 
@@ -154,6 +184,24 @@ int nk_fiber_init_ap();
 
 void nk_fiber_startup();
 
+// Wrapper yield for injection pass
+int wrapper_nk_fiber_yield();
+
+// Benchmark functions for injection pass
+void print_data();
+
+List_t * createList(uint64_t start, uint64_t size);
+
+TreeNode_t * createTree(uint64_t start, uint64_t size);
+
+TreeQueue_t * createQueue(void);
+
+uint64_t * createRandArray50();
+
+void dummy_func(double a, double b, double c);
+
+void sum_dummy_func(uint64_t a);
+	
 // TODO MAC: Change name to nk_fiber_queue 
 /******** FIBER QUEUE **********/
 /*

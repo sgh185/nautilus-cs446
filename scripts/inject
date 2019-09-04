@@ -49,38 +49,51 @@ export PATH=~/CAT/bin:$PATH
 cd ~/CAT-c
 ./run_me.sh
 
-cd ~/nautilus-cs446
+cd ~/nautilus-cs446-un
 make clean
 make V=1 -j 4
 
-clang -emit-llvm -Wp,-MD,src/nautilus/.fiber.o.d   -D__NAUTILUS__ -Iinclude  -include include/autoconf.h -D__NAUTILUS__ -fno-omit-frame-pointer -ffreestanding -fno-stack-protector -fno-strict-aliasing -fno-strict-overflow -mno-red-zone -mcmodel=large -O2 $UNROLL  -Wall -Wno-unused-function -Wno-unused-variable -fno-common -Wstrict-overflow=5 -fgnu89-inline -g -m64  -Wno-pointer-sign    -D"KBUILD_STR(s)=#s" -D"KBUILD_BASENAME=KBUILD_STR(fiber)"  -D"KBUILD_MODNAME=KBUILD_STR(fiber)" -c -Xclang -disable-O0-optnone -o src/llvm/fiber-injection/test/runtime/fibers/fibers.bc src/test/fibers.c
+clang -emit-llvm -Wp,-MD,src/nautilus/.fibers.o.d   -D__NAUTILUS__ -Iinclude  -include include/autoconf.h -D__NAUTILUS__ -fno-omit-frame-pointer -ffreestanding -fno-stack-protector -fno-strict-aliasing -fno-strict-overflow -mno-red-zone -mcmodel=large -O2 $UNROLL  -Wall -Wno-unused-function -Wno-unused-variable -fno-common -Wstrict-overflow=5 -fgnu89-inline -g -m64  -Wno-pointer-sign    -D"KBUILD_STR(s)=#s" -D"KBUILD_BASENAME=KBUILD_STR(fibers)"  -D"KBUILD_MODNAME=KBUILD_STR(fibers)" -c -Xclang -disable-O0-optnone -o src/test/fibers/fibers.bc src/test/fibers.c
 
-clang -emit-llvm -Wp,-MD,src/nautilus/.fiber.o.d   -D__NAUTILUS__ -Iinclude  -include include/autoconf.h -D__NAUTILUS__ -fno-omit-frame-pointer -ffreestanding -fno-stack-protector -fno-strict-aliasing -fno-strict-overflow -mno-red-zone -mcmodel=large  -O2 $UNROLL  -Wall -Wno-unused-function -Wno-unused-variable -fno-common -Wstrict-overflow=5 -fgnu89-inline -g -m64  -Wno-pointer-sign    -D"KBUILD_STR(s)=#s" -D"KBUILD_BASENAME=KBUILD_STR(fiber)"  -D"KBUILD_MODNAME=KBUILD_STR(fiber)" -c -Xclang -disable-O0-optnone -o src/llvm/fiber-injection/test/runtime/instrument/instrument.bc src/test/instrument.c
+clang -emit-llvm -Wp,-MD,src/nautilus/.instrument.o.d   -D__NAUTILUS__ -Iinclude  -include include/autoconf.h -D__NAUTILUS__ -fno-omit-frame-pointer -ffreestanding -fno-stack-protector -fno-strict-aliasing -fno-strict-overflow -mno-red-zone -mcmodel=large  -O2 $UNROLL  -Wall -Wno-unused-function -Wno-unused-variable -fno-common -Wstrict-overflow=5 -fgnu89-inline -g -m64  -Wno-pointer-sign    -D"KBUILD_STR(s)=#s" -D"KBUILD_BASENAME=KBUILD_STR(instrument)"  -D"KBUILD_MODNAME=KBUILD_STR(instrument)" -c -Xclang -disable-O0-optnone -o src/test/instrument/instrument.bc src/test/instrument.c
+
+clang -emit-llvm -Wp,-MD,src/nautilus/.fiber_benchmark.o.d   -D__NAUTILUS__ -Iinclude  -include include/autoconf.h -D__NAUTILUS__ -fno-omit-frame-pointer -ffreestanding -fno-stack-protector -fno-strict-aliasing -fno-strict-overflow -mno-red-zone -mcmodel=large  -O2 $UNROLL  -Wall -Wno-unused-function -Wno-unused-variable -fno-common -Wstrict-overflow=5 -fgnu89-inline -g -m64  -Wno-pointer-sign    -D"KBUILD_STR(s)=#s" -D"KBUILD_BASENAME=KBUILD_STR(fiber_benchmark)"  -D"KBUILD_MODNAME=KBUILD_STR(fiber_benchmark)" -c -Xclang -disable-O0-optnone -o src/test/fiber_benchmark/fiber_benchmark.bc src/test/fiber_benchmark.c
 
 clang -emit-llvm -Wp,-MD,src/nautilus/.fiber.o.d   -D__NAUTILUS__ -Iinclude  -include include/autoconf.h -D__NAUTILUS__ -fno-omit-frame-pointer -ffreestanding -fno-stack-protector -fno-strict-aliasing -fno-strict-overflow -mno-red-zone -mcmodel=large  -O2 $UNROLL  -Wall -Wno-unused-function -Wno-unused-variable -fno-common -Wstrict-overflow=5 -fgnu89-inline -g -m64  -Wno-pointer-sign    -D"KBUILD_STR(s)=#s" -D"KBUILD_BASENAME=KBUILD_STR(fiber)"  -D"KBUILD_MODNAME=KBUILD_STR(fiber)" -c -Xclang -disable-O0-optnone -o src/nautilus/fiber.bc src/nautilus/fiber.c
 
-llvm-link -internalize src/llvm/fiber-injection/test/runtime/fibers/fibers.bc src/nautilus/fiber.bc -o src/llvm/fiber-injection/test/runtime/fibers/fibers_link.bc
-llvm-dis src/llvm/fiber-injection/test/runtime/fibers/fibers_link.bc
+llvm-link -internalize src/test/fibers/fibers.bc src/nautilus/fiber.bc -o src/test/fibers/fibers_link.bc
+llvm-dis src/test/fibers/fibers_link.bc
 
-llvm-link -internalize src/llvm/fiber-injection/test/runtime/instrument/instrument.bc src/nautilus/fiber.bc -o src/llvm/fiber-injection/test/runtime/instrument/instrument_link.bc
-llvm-dis src/llvm/fiber-injection/test/runtime/instrument/instrument_link.bc
+llvm-link -internalize src/test/instrument/instrument.bc src/nautilus/fiber.bc -o src/test/instrument/instrument_link.bc
+llvm-dis src/test/instrument/instrument_link.bc
 
-clang -emit-llvm $XCLANG $LOAD $XCLANG $CAT -Wp,-MD,src/nautilus/.fiber.o.d   -D__NAUTILUS__ -Iinclude  -include include/autoconf.h -D__NAUTILUS__ -fno-omit-frame-pointer -ffreestanding -fno-stack-protector -fno-strict-aliasing -fno-strict-overflow -mno-red-zone -mcmodel=large -O0 -loops -Wall -Wno-unused-function -Wno-unused-variable -fno-common -Wstrict-overflow=5 -fgnu89-inline -g -m64  -Wno-pointer-sign    -D"KBUILD_STR(s)=#s" -D"KBUILD_BASENAME=KBUILD_STR(fiber)"  -D"KBUILD_MODNAME=KBUILD_STR(fiber)" -c -Xclang -disable-O0-optnone -o src/llvm/fiber-injection/test/runtime/fibers/fibers_optimized.bc src/llvm/fiber-injection/test/runtime/fibers/fibers_link.bc &> src/llvm/fiber-injection/test/runtime/fibers/fiber_output
- 
-clang -Wp,-MD,src/nautilus/.fiber.o.d   -D__NAUTILUS__ -Iinclude  -include include/autoconf.h -D__NAUTILUS__ -fno-omit-frame-pointer -ffreestanding -fno-stack-protector -fno-strict-aliasing -fno-strict-overflow -mno-red-zone -mcmodel=large  -O2 -Wall -Wno-unused-function -Wno-unused-variable -fno-common -Wstrict-overflow=5 -fgnu89-inline -g -m64  -Wno-pointer-sign    -D"KBUILD_STR(s)=#s" -D"KBUILD_BASENAME=KBUILD_STR(fiber)"  -D"KBUILD_MODNAME=KBUILD_STR(fiber)" -c -o src/llvm/fiber-injection/test/runtime/fibers.o src/llvm/fiber-injection/test/runtime/fibers/fibers_optimized.bc
+llvm-link -internalize src/test/fiber_benchmark/fiber_benchmark.bc src/nautilus/fiber.bc -o src/test/fiber_benchmark/fiber_benchmark_link.bc
+llvm-dis src/test/fiber_benchmark/fiber_benchmark_link.bc
 
-clang -emit-llvm $XCLANG $LOAD $XCLANG $CAT -Wp,-MD,src/nautilus/.fiber.o.d   -D__NAUTILUS__ -Iinclude  -include include/autoconf.h -D__NAUTILUS__ -fno-omit-frame-pointer -ffreestanding -fno-stack-protector -fno-strict-aliasing -fno-strict-overflow -mno-red-zone -mcmodel=large  -O0 -loops -Wall -Wno-unused-function -Wno-unused-variable -fno-common -Wstrict-overflow=5 -fgnu89-inline -g -m64  -Wno-pointer-sign    -D"KBUILD_STR(s)=#s" -D"KBUILD_BASENAME=KBUILD_STR(fiber)"  -D"KBUILD_MODNAME=KBUILD_STR(fiber)" -c -Xclang -disable-O0-optnone -o src/llvm/fiber-injection/test/runtime/instrument/instrument_optimized.bc src/llvm/fiber-injection/test/runtime/instrument/instrument_link.bc &> src/llvm/fiber-injection/test/runtime/instrument/instrument_output
- 
-clang -Wp,-MD,src/nautilus/.fiber.o.d   -D__NAUTILUS__ -Iinclude  -include include/autoconf.h -D__NAUTILUS__ -fno-omit-frame-pointer -ffreestanding -fno-stack-protector -fno-strict-aliasing -fno-strict-overflow -mno-red-zone -mcmodel=large  -O2 -Wall -Wno-unused-function -Wno-unused-variable -fno-common -Wstrict-overflow=5 -fgnu89-inline -g -m64  -Wno-pointer-sign    -D"KBUILD_STR(s)=#s" -D"KBUILD_BASENAME=KBUILD_STR(fiber)"  -D"KBUILD_MODNAME=KBUILD_STR(fiber)" -c -o src/llvm/fiber-injection/test/runtime/instrument.o src/llvm/fiber-injection/test/runtime/instrument/instrument_optimized.bc
+clang -emit-llvm $XCLANG $LOAD $XCLANG $CAT -Wp,-MD,src/nautilus/.fibers.o.d   -D__NAUTILUS__ -Iinclude  -include include/autoconf.h -D__NAUTILUS__ -fno-omit-frame-pointer -ffreestanding -fno-stack-protector -fno-strict-aliasing -fno-strict-overflow -mno-red-zone -mcmodel=large -O0 -loops -Wall -Wno-unused-function -Wno-unused-variable -fno-common -Wstrict-overflow=5 -fgnu89-inline -g -m64  -Wno-pointer-sign    -D"KBUILD_STR(s)=#s" -D"KBUILD_BASENAME=KBUILD_STR(fibers)"  -D"KBUILD_MODNAME=KBUILD_STR(fibers)" -c -Xclang -disable-O0-optnone -o src/test/fibers/fibers_optimized.bc src/test/fibers/fibers_link.bc &> fiber_output5
+
+clang -Wp,-MD,src/nautilus/.fibers.o.d   -D__NAUTILUS__ -Iinclude  -include include/autoconf.h -D__NAUTILUS__ -fno-omit-frame-pointer -ffreestanding -fno-stack-protector -fno-strict-aliasing -fno-strict-overflow -mno-red-zone -mcmodel=large  -O2 -Wall -Wno-unused-function -Wno-unused-variable -fno-common -Wstrict-overflow=5 -fgnu89-inline -g -m64  -Wno-pointer-sign    -D"KBUILD_STR(s)=#s" -D"KBUILD_BASENAME=KBUILD_STR(fibers)"  -D"KBUILD_MODNAME=KBUILD_STR(fibers)" -c -o src/test/fibers.o src/test/fibers/fibers_optimized.bc
+
+clang -emit-llvm $XCLANG $LOAD $XCLANG $CAT -Wp,-MD,src/nautilus/.instrument.o.d   -D__NAUTILUS__ -Iinclude  -include include/autoconf.h -D__NAUTILUS__ -fno-omit-frame-pointer -ffreestanding -fno-stack-protector -fno-strict-aliasing -fno-strict-overflow -mno-red-zone -mcmodel=large  -O0 -loops -Wall -Wno-unused-function -Wno-unused-variable -fno-common -Wstrict-overflow=5 -fgnu89-inline -g -m64  -Wno-pointer-sign    -D"KBUILD_STR(s)=#s" -D"KBUILD_BASENAME=KBUILD_STR(instrument)"  -D"KBUILD_MODNAME=KBUILD_STR(instrument)" -c -Xclang -disable-O0-optnone -o src/test/instrument/instrument_optimized.bc src/test/instrument/instrument_link.bc &> instrument_output5
+
+clang -Wp,-MD,src/nautilus/.instrument.o.d   -D__NAUTILUS__ -Iinclude  -include include/autoconf.h -D__NAUTILUS__ -fno-omit-frame-pointer -ffreestanding -fno-stack-protector -fno-strict-aliasing -fno-strict-overflow -mno-red-zone -mcmodel=large  -O2 -Wall -Wno-unused-function -Wno-unused-variable -fno-common -Wstrict-overflow=5 -fgnu89-inline -g -m64  -Wno-pointer-sign    -D"KBUILD_STR(s)=#s" -D"KBUILD_BASENAME=KBUILD_STR(instrument)"  -D"KBUILD_MODNAME=KBUILD_STR(instrument)" -c -o src/test/instrument.o src/test/instrument/instrument_optimized.bc
+
+clang -emit-llvm $XCLANG $LOAD $XCLANG $CAT -Wp,-MD,src/nautilus/.fiber_benchmark.o.d   -D__NAUTILUS__ -Iinclude  -include include/autoconf.h -D__NAUTILUS__ -fno-omit-frame-pointer -ffreestanding -fno-stack-protector -fno-strict-aliasing -fno-strict-overflow -mno-red-zone -mcmodel=large  -O0 -loops -Wall -Wno-unused-function -Wno-unused-variable -fno-common -Wstrict-overflow=5 -fgnu89-inline -g -m64  -Wno-pointer-sign    -D"KBUILD_STR(s)=#s" -D"KBUILD_BASENAME=KBUILD_STR(fiber_benchmark)"  -D"KBUILD_MODNAME=KBUILD_STR(fiber_benchmark)" -c -Xclang -disable-O0-optnone -o src/test/fiber_benchmark/fiber_benchmark_optimized.bc src/test/fiber_benchmark/fiber_benchmark_link.bc &> fiber_benchmark_output5
+
+clang -Wp,-MD,src/nautilus/.fiber_benchmark.o.d   -D__NAUTILUS__ -Iinclude  -include include/autoconf.h -D__NAUTILUS__ -fno-omit-frame-pointer -ffreestanding -fno-stack-protector -fno-strict-aliasing -fno-strict-overflow -mno-red-zone -mcmodel=large  -O2 -Wall -Wno-unused-function -Wno-unused-variable -fno-common -Wstrict-overflow=5 -fgnu89-inline -g -m64  -Wno-pointer-sign    -D"KBUILD_STR(s)=#s" -D"KBUILD_BASENAME=KBUILD_STR(fiber_benchmark)"  -D"KBUILD_MODNAME=KBUILD_STR(fiber_benchmark)" -c -o src/test/fiber_benchmark.o src/test/fiber_benchmark/fiber_benchmark_optimized.bc
          
-llvm-dis src/llvm/fiber-injection/test/runtime/fibers/fibers.bc   
-llvm-dis src/llvm/fiber-injection/test/runtime/fibers/fibers_optimized.bc
+         
+llvm-dis src/test/fibers/fibers.bc   
+llvm-dis src/test/fibers/fibers_optimized.bc
 
-llvm-dis src/llvm/fiber-injection/test/runtime/instrument/instrument.bc
-llvm-dis src/llvm/fiber-injection/test/runtime/instrument/instrument_optimized.bc
+llvm-dis src/test/instrument/instrument.bc
+llvm-dis src/test/instrument/instrument_optimized.bc
 
-mv src/nautilus/fiber.bc src/llvm/fiber-injection/test/runtime/fibers/fiber.bc
-llvm-dis src/llvm/fiber-injection/test/runtime/fibers/fiber.bc
+llvm-dis src/test/fiber_benchmark/fiber_benchmark.bc
+llvm-dis src/test/fiber_benchmark/fiber_benchmark_optimized.bc
+
+mv src/nautilus/fiber.bc src/test/fibers/fiber.bc
+llvm-dis src/test/fibers/fiber.bc
 
 make V=1
 
@@ -101,8 +114,9 @@ then
 		mkdir "$SAVEDIR/savebuild"
 		cp nautilus.bin "$SAVEDIR/savebuild"
 		cp nautilus.iso "$SAVEDIR/savebuild"
-		cp -r src/llvm/fiber-injection/test/runtime/fibers "$SAVEDIR/savebuild"
-		cp -r src/llvm/fiber-injection/test/runtime/instrument "$SAVEDIR/savebuild"
+		cp -r src/test/fibers "$SAVEDIR/savebuild"
+		cp -r src/test/instrument "$SAVEDIR/savebuild"
+		cp -r src/test/fiber_benchmark "$SAVEDIR/savebuild"
 		cp inject "$SAVEDIR/savebuild"
 		cp ../CAT-c/catpass/CatPass.cpp "$SAVEDIR/savebuild"
 	else

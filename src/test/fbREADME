@@ -1,0 +1,30 @@
+***BENCHMARK ROUTINES***
+
+# Purpose: Testing timing accuracy and policies of yield injection pass on fiber routines that involving
+           simple data structures, pointer indirection, various loop structures, etc. 
+
+# IMPLEMENTATIONS:
+  - Format: name (test topics): routine num 1, routine num 2 
+
+Timing loops (interprocedural):
+  - Non-staggered: 1, 2
+  - Staggered: 3, 4
+
+Dot product (loop extending, accuracy): 5, 6
+
+Matrix multiply (loop extending --- nested, 'canonical' loops, unroll policy, compile time):
+  - Known dimensions: 9, 10
+  - Random dimensions: 13, 14
+
+Linked-list traversal (loop extending --- 'non-canonical' loops, unroll policy): 7, 8
+
+BST search (loop extending --- nested, 'non-canonical' loops, unroll policy): 11, 12
+
+Level-order tree traversal (loop extending --- 'non-canonical' loops, unroll policy): 21, 22
+
+Floating point operations (accuracy):
+  - Volatile sum: 15, 16
+  - Non-volatile sum: 17, 18
+
+Integer operations (accuracy):
+  - Volatile sum: 19, 20 

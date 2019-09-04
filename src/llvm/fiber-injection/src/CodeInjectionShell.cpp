@@ -71,6 +71,7 @@ using namespace std;
 
 // Pass settings
 #define DEBUG 0
+#define LOOP_DEBUG 0
 #define INLINE 0
 #define INJECT 1
 #define FALSE 0
@@ -85,7 +86,8 @@ using namespace std;
 // Guards for yield call injections
 #define GRAN 200
 #define CALL_GUARDS 0
-#define LOOP_GUARDS 0
+#define LOOP_GUARDS 1
+#define LOOP_OPT 1
 
 // Conservativeness, Latency path configurations
 #define MAXIMUM 0
@@ -172,7 +174,6 @@ struct CAT : public ModulePass
 
         // Get rid of LLVM debug intrinsics
         StripDebugInfo(M);
-
 #if INJECT
         // Force inlining of nk_fiber_yield (should only occur in wrapper_nk_fiber_yield)
         inlineF(DI, *(FIBERS[INNER_YIELD]));
@@ -234,10 +235,11 @@ struct CAT : public ModulePass
              * latency size matches a multiple of the granularity --- now injection in loop blocks 
              * are possible in intervals determined by the granularity
              */
+            set<Instruction *> LoopGuards;
 
-            findAndSetLoops(*routine);
-            errs() << "GOT HERE\n";
-
+#if LOOP_OPT
+            findAndSetLoops(*routine, LoopGuards);
+#endif
             /*
             * GENERATE LATENCY CALCULATIONS --- a data flow analysis to compute expected 
             * and/or maximum latency for each bitcode instruction of the function (based on 
@@ -248,8 +250,7 @@ struct CAT : public ModulePass
 
             // Isolate function back edges
             unordered_map<BasicBlock *, set<BasicBlock *>> BackEdges;
-            set<Instruction *> LoopTerminators;
-            organizeFunctionBackedges(*routine, BackEdges, LoopTerminators);
+            organizeFunctionBackedges(*routine, BackEdges);
 
             // Latency calculations
             unordered_map<Instruction *, double> LatencyMeasurements;
@@ -262,7 +263,7 @@ struct CAT : public ModulePass
             */
             set<Instruction *> InjectionLocations;
             markInjectionLocationsFromLatencies(*routine, LatencyMeasurements, BackEdges, InjectionLocations);
-            markGuardLocations(*routine, LoopTerminators, InjectionLocations);
+            markGuardLocations(*routine, LoopGuards, InjectionLocations);
 
             /*
              * INJECT CALLS TO YIELD
@@ -344,7 +345,6 @@ struct CAT : public ModulePass
             }
 #endif
         }
-        return false;
 
 #if INLINE
         // INLINING --- inline the wrapper_nk_fiber_yield, inline all routines
@@ -398,7 +398,8 @@ struct CAT : public ModulePass
 
     // ========================= LOOP SETTING =========================
 
-    void findAndSetLoops(Function &F)
+    void findAndSetLoops(Function &F,
+                         set<Instruction *> &LG)
     {
         auto &LI = getAnalysis<LoopInfoWrapperPass>(F).getLoopInfo();
         auto &DT = getAnalysis<DominatorTreeWrapperPass>(F).getDomTree();
@@ -414,48 +415,121 @@ struct CAT : public ModulePass
             simplifyLoop(L, &DT, &LI, &SE, &AC, true);
         }
 
-        /*
+#if LOOP_DEBUG
+        errs() << "\n\n========================BEFORE TRANFORM - LOOPS FROM LI========================\n\n";
+        errs() << F.getName() << "\n";
+        for (auto L : LI)
+        {
+            errs() << "LI LOOP:\n";
+            L->print(errs());
+            for (auto B = L->block_begin(); B != L->block_end(); ++B)
+                (*B)->print(errs());
+            errs() << "\nNOW SUBLOOPS\n";
+            vector<Loop *> SLs = L->getSubLoops();
+            if (SLs.size() > 0)
+            {
+                for (auto SL : SLs)
+                {
+                    errs() << "SUBLOOP:\n";
+                    SL->print(errs());
+                    for (auto B = SL->block_begin(); B != SL->block_end(); ++B)
+                        (*B)->print(errs());
+                }
+            }
+            errs() << "\n\n\n";
+        }
+        //return;
+#endif
+        vector<Loop *> Loops;
+        for (auto L : LI)
+            Loops.push_back(L);
+
+            /*
          * Depth first --- transform loops (and subloops) to a total latency size
          * that is a multiple of the granularity
          */
-        for (auto L : LI)
+            // errs() << "\n\n=====NOW ENTERING TRANFORM =====\n\n";
+#if LOOP_DEBUG
+        errs() << "\n\n=====NOW ENTERING TRANFORM =====\n\n";
+#endif
+        for (auto L : Loops)
         {
-            vector<Loop *> SLs = L->getSubLoops();
-            for (auto SL : SLs)
-                transformLoop(LI, SL, DT, SE, AC, ORE, calculatePrelimLoopLatencySize(F, LI, SL));
-
-            transformLoop(LI, L, DT, SE, AC, ORE, calculatePrelimLoopLatencySize(F, LI, L));
+#if LOOP_DEBUG
+            errs() << "CURR LOOP TO PASS TO TRANSFORM LOOP\n";
+            L->print(errs());
+            for (auto B = L->block_begin(); B != L->block_end(); ++B)
+                (*B)->print(errs());
+            errs() << "HELLO THERE\n";
+#endif
+            transformLoop(F, L, LI, DT, SE, AC, ORE, LG);
         }
 
         return;
     }
 
-    void transformLoop(LoopInfo &LI, Loop *L,
-                       DominatorTree &DT, ScalarEvolution &SE,
+    void transformLoop(Function &F, Loop *L,
+                       LoopInfo &LI, DominatorTree &DT, ScalarEvolution &SE,
                        AssumptionCache &AC, OptimizationRemarkEmitter &ORE,
-                       double size)
+                       set<Instruction *> &LG)
     {
-        uint64_t count = getUnrollCount(size);
+#if LOOP_DEBUG
+        errs() << "\n\n\nIN TRANSFORM LOOP\n";
+        errs() << "CURR LOOP TO TRANSFORM:\n";
+        L->print(errs());
+        for (auto B = L->block_begin(); B != L->block_end(); ++B)
+            (*B)->print(errs());
+
+        errs() << "CURR LOOP INDUCTION VARIABLE:\n";
+        auto IV = L->getCanonicalInductionVariable();
+        if (IV != nullptr)
+        {
+            IV->print(errs());
+            errs() << "\n";
+        }
+        else
+        {
+            errs() << "NULLPTR IV ---\n";
+        }
+        //return;
+#endif
+        vector<Loop *> SLs = L->getSubLoops();
+        if (SLs.size() > 0)
+        {
+            // errs() << "\nNOW SUBLOOPS TO TRANSFORM\n";
+            for (auto SL : SLs)
+            {
+#if LOOP_DEBUG
+                errs() << "SUBLOOP TO TRANSFORM:\n";
+                SL->print(errs());
+                for (auto B = SL->block_begin(); B != SL->block_end(); ++B)
+                    (*B)->print(errs());
+#endif
+                transformLoop(F, SL, LI, DT, SE, AC, ORE, LG);
+            }
+        }
+        //return;
+
+        // errs() << "COUNT: " << count << "\n";
+        // return;
 
         if (L->isLoopSimplifyForm() && L->isLCSSAForm(DT))
         {
+            unsigned minTripMultiple = 1;
             auto tripCount = SE.getSmallConstantTripCount(L);
-            auto tripMultiple = SE.getSmallConstantTripMultiple(L);
+            auto tripMultiple = max(minTripMultiple, SE.getSmallConstantTripMultiple(L));
 
-            auto unrollCount = count;
+            auto unrollCount = tripCount;
             auto peelCount = 0;
+            //auto unrollCount = getUnrollCount(calculatePrelimLoopLatencySize(F, LI, L));
 
             // For loops with an unknown trip count, set peelCount instead
-            if (!tripCount)
-            {
-                peelCount = count;
-                unrollCount = 2;
-            }
+            if (unrollCount > 100 || !unrollCount)
+                unrollCount = getUnrollCount(calculatePrelimLoopLatencySize(F, LI, L));
 
-            auto forceUnroll = false;
+            auto forceUnroll = true;
             auto allowRuntime = true;
-            auto allowExpensiveTripCount = false;
-            auto preserveCondBr = false;
+            auto allowExpensiveTripCount = true;
+            auto preserveCondBr = true;
             auto preserveOnlyFirst = false;
 
             LoopUnrollResult unrolled = UnrollLoop(L, unrollCount, tripCount,
@@ -465,7 +539,19 @@ struct CAT : public ModulePass
 
             if (unrolled == LoopUnrollResult::FullyUnrolled || unrolled == LoopUnrollResult::PartiallyUnrolled)
                 errs() << "\nUNROLLED SUCCESSFULLY\n";
+            else
+            {
+#if LOOP_DEBUG
+
+                errs() << "NOT UNROLLED\n";
+                L->print(errs());
+                errs() << "\n";
+#endif
+                LG.insert(getLastLoopBlock(L)->getTerminator());
+            }
         }
+        else
+            LG.insert(getLastLoopBlock(L)->getTerminator());
 
         return;
     }
@@ -477,8 +563,7 @@ struct CAT : public ModulePass
         unordered_map<BasicBlock *, pair<double, double>> latencyMeasurements;
 
         unordered_map<BasicBlock *, set<BasicBlock *>> BackEdges;
-        set<Instruction *> LoopTerminators;
-        organizeFunctionBackedges(F, BackEdges, LoopTerminators);
+        organizeFunctionBackedges(F, BackEdges);
 
         for (auto B = L->block_begin(); B != L->block_end(); ++B)
         {
@@ -547,8 +632,7 @@ struct CAT : public ModulePass
      */
 
     void organizeFunctionBackedges(Function &F,
-                                   unordered_map<BasicBlock *, set<BasicBlock *>> &BackEdges,
-                                   set<Instruction *> &LT)
+                                   unordered_map<BasicBlock *, set<BasicBlock *>> &BackEdges)
     {
         SmallVector<pair<const BasicBlock *, const BasicBlock *>, 32> Edges;
         FindFunctionBackedges(F, Edges);
@@ -558,8 +642,9 @@ struct CAT : public ModulePass
             BasicBlock *from = const_cast<BasicBlock *>(Edges[iter].first);
             BasicBlock *to = const_cast<BasicBlock *>(Edges[iter].second);
             BackEdges[from].insert(to);
-            LT.insert(to->getTerminator());
         }
+
+        return;
     }
 
     /*
@@ -763,7 +848,7 @@ struct CAT : public ModulePass
     }
 
     void markGuardLocations(Function &F,
-                            const set<Instruction *> &LT,
+                            const set<Instruction *> &LG,
                             set<Instruction *> &IL)
     {
 
@@ -794,10 +879,37 @@ struct CAT : public ModulePass
 #endif
 
 #if LOOP_GUARDS
-        // Find injection locations based on terminating instructions of loop blocks
-        for (auto loopTerminator : LT)
-            IL.insert(loopTerminator);
+        for (auto loopGuard : LG)
+            IL.insert(loopGuard);
+
+        auto &LI = getAnalysis<LoopInfoWrapperPass>(F).getLoopInfo();
+        for (auto L : LI)
+        {
+            vector<Loop *> SLs = L->getSubLoops();
+            for (auto SL : SLs)
+                locationInLoop(SL, IL);
+
+            locationInLoop(L, IL);
+        }
 #endif
+        return;
+    }
+
+    void locationInLoop(Loop *L,
+                        set<Instruction *> &IL)
+    {
+        bool loopYielded = false;
+        for (auto I : IL)
+        {
+            if (L->contains(I))
+            {
+                loopYielded = true;
+                break;
+            }
+        }
+
+        if (!loopYielded)
+            IL.insert(getLastLoopBlock(L)->getTerminator());
 
         return;
     }
@@ -1098,28 +1210,14 @@ struct CAT : public ModulePass
             break;
         case Instruction::Call:
         {
-            // **** POSSIBLE BUG ****
-            /*
             if (auto *call = dyn_cast<CallInst>(I)) // don't want to involve LLVM internals
             {
                 Function *callee = call->getCalledFunction();
                 if (callee != nullptr)
-                {
-                    if (callee->isIntrinsic())
-                    {
-                        call->print(errs());
-                        errs() << "\n";
-                        cost = 0;
-                    }
-                    else
-                        cost = 100;
-                }
+                    cost = ((callee->isIntrinsic()) || (callee->getName().startswith("llvm.lifetime"))) ? 0 : 200;
                 else
-                    cost = 100;
+                    cost = 200; // Arbitrary
             }
-            */
-
-            cost = 100;
 
             break;
         }
@@ -1130,7 +1228,7 @@ struct CAT : public ModulePass
             I->print(errs());
             errs() << "\n";
 #endif
-            cost = 14; // this is random
+            cost = 8; // this is random
             break;
         }
         }
@@ -1153,10 +1251,8 @@ struct CAT : public ModulePass
                     const unordered_map<BasicBlock *, set<BasicBlock *>> &BackEdges)
     {
         if (BackEdges.find(from) != BackEdges.end())
-        {
             if (BackEdges.at(from).find(to) != BackEdges.at(from).end())
                 return true;
-        }
 
         return false;
     }

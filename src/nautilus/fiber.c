@@ -12,6 +12,7 @@
  *
  * Copyright (c) 2019, Michael A. Cuevas <cuevas@u.northwestern.edu>
  * Copyright (c) 2019, Enrico Deiana <ead@u.northwestern.edu>
+ * Copyright (c) 2019, Souradip Ghosh <sgh@u.northwestern.edu>
  * Copyright (c) 2019, Peter A. Dinda <pdinda@northwestern.edu>
  * Copyright (c) 2019, The V3VEE Project  <http://www.v3vee.org> 
  *                     The Hobbes Project <http://xstack.sandia.gov/hobbes>
@@ -287,7 +288,7 @@ static void _nk_fiber_init(nk_fiber_t *f)
 
 static void _nk_fiber_init(nk_fiber_t *f)
 {
-  f->rsp = (uint64_t) f->stack + f->stack_size;
+  f->rsp = (uint64_t) f->stack + f->stack_size - 8;
   _fiber_push(f, (uint64_t) _fiber_wrapper);
   _fiber_push(f, 0x0ul);
   _fiber_push(f, 0x0ul);
@@ -724,6 +725,50 @@ int nk_fiber_start(nk_fiber_fun_t fun,
 
   return 0;
 }
+
+// ******* WRAPPER NK FIBER YIELD *******
+extern void nk_simple_timing_loop(uint64_t);
+
+static uint64_t rdtsc_wrapper_begin = 0, rdtsc_wrapper_end = 0;
+static uint64_t data[10000];
+static int a = 0;
+
+int wrapper_nk_fiber_yield()
+{
+  // nk_vc_printf("wrapper_nk_fiber_yield : running\n");
+  rdtsc_wrapper_begin = rdtsc();
+  data[a] = rdtsc_wrapper_begin - rdtsc_wrapper_end;
+   
+  a++;
+
+  nk_fiber_yield();
+  rdtsc_wrapper_end = rdtsc();
+
+  return 0;
+}
+
+void print_data() __attribute__ ((optnone))
+{
+  // Print markers
+  nk_vc_printf("PRINTSTART\n");
+  
+  // Print intervals
+  int i;
+  for (i = 0; i < a; ++i)
+    nk_vc_printf("%d\n", data[i]);
+  
+  nk_vc_printf("PRINTEND\n");
+
+  // Resetting globals 
+  memset(data, 0, sizeof(data));
+  a = 0;
+  rdtsc_wrapper_begin = 0;
+  rdtsc_wrapper_end = 0;
+
+  return;
+}
+
+// **********
 
 // TODO MAC: check if we're running in the fiber thread before we allow yield to take place
 int nk_fiber_yield()
