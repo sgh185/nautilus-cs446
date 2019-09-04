@@ -1290,7 +1290,7 @@ nk_scancode_t nk_vc_get_scancode(int wait)
 static int enqueue_scancode_as_keycode(struct nk_virtual_console *__cur_vc, uint8_t scan)
 {
   nk_keycode_t key = kbd_translate(scan);
-  if(key != NO_KEY) {
+  if(key != NO_KEY && key < KEY_MAX) {
     nk_enqueue_keycode(__cur_vc, key);
   }
   return 0;

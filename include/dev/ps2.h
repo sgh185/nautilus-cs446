@@ -106,6 +106,9 @@ typedef uint16_t nk_scancode_t;
 #define KEY_KPINSERT _KEYPAD(11)
 #define KEY_KPDEL   _KEYPAD(12)
 
+// *** hack --- max key num ***
+#define KEY_MAX (KEY_KPDEL | KEY_CAPS_FLAG)
+
 nk_keycode_t kbd_translate(nk_scancode_t);
 
 typedef struct nk_mouse_event {

@@ -31,7 +31,7 @@ extern "C" {
 
 #include <lib/bitops.h>
 
-extern __attribute__((const)) int ____ilog2_NaN(void);
+// extern __attribute__((const)) int ____ilog2_NaN(void);
 
 #define is_power_of_2(x) ((x) != 0 && (((x) & ((x) - 1)) == 0))
 static inline __attribute__((const))
@@ -44,7 +44,11 @@ int __ilog2_u64(uint64_t n)
 {
 	return fls64(n) - 1;
 }
-
+static inline __attribute__((const))
+int ____ilog2_NaN(void)
+{
+	return -1;
+}
 /*
  * round up to nearest power of two
  */

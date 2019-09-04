@@ -82,12 +82,22 @@ void vga_puts(char *buf);
 
 static inline void vga_copy_out(void *dest, uint32_t n)
 {
-  memcpy((void *)dest,(void*)VGA_BASE_ADDR,n);
+  int i;
+  for (i=0;i<(n/2);i++) { 
+    *(((uint16_t *)dest)+i) = *(((uint16_t *)VGA_BASE_ADDR)+i); 
+  }
+  
+  // memcpy((void *)dest,(void*)VGA_BASE_ADDR,n);
 }
 
 static inline void vga_copy_in(void *src, uint32_t n)
 {
-  memcpy((void*)VGA_BASE_ADDR, src, n);
+  int i;
+  for (i=0;i<(n/2);i++) { 
+    *(((uint16_t *)VGA_BASE_ADDR)+i) = *(((uint16_t *)src)+i); 
+  }
+  
+  //memcpy((void*)VGA_BASE_ADDR, src, n);
 }
 
 
