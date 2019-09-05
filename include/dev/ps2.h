@@ -48,6 +48,7 @@ typedef uint16_t nk_scancode_t;
 // Special tags to indicate unavailabilty
 #define NO_KEY      ((nk_keycode_t)(0xffff))
 #define NO_SCANCODE ((nk_scancode_t)(0xffff))
+#define INVALID_SCANCODE 0xE0
 
 // Special flags for a keycode that reflect status of 
 // modifiers
@@ -105,9 +106,6 @@ typedef uint16_t nk_scancode_t;
 #define KEY_KPPGDN  _KEYPAD(10)
 #define KEY_KPINSERT _KEYPAD(11)
 #define KEY_KPDEL   _KEYPAD(12)
-
-// *** hack --- max key num ***
-#define KEY_MAX (KEY_KPDEL | KEY_CAPS_FLAG)
 
 nk_keycode_t kbd_translate(nk_scancode_t);
 

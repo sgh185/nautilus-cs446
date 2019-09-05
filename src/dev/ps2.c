@@ -487,7 +487,10 @@ kbd_handler (excp_entry_t * excp, excp_vec_t vec, void *state)
       goto out;
     }
 #endif
-    
+
+    if (scan == INVALID_SCANCODE) {
+      goto out;
+    }    
     
     switcher(scan);
 
