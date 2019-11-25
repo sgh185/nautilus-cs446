@@ -412,7 +412,7 @@ struct CAT : public ModulePass
         {
             auto L = &*l;
             formLCSSARecursively(*L, DT, &LI, &SE);
-            simplifyLoop(L, &DT, &LI, &SE, &AC, true);
+            simplifyLoop(L, &DT, &LI, &SE, &AC, nullptr, true);
         }
 
 #if LOOP_DEBUG
@@ -526,16 +526,22 @@ struct CAT : public ModulePass
             if (unrollCount > 100 || !unrollCount)
                 unrollCount = getUnrollCount(calculatePrelimLoopLatencySize(F, LI, L));
 
-            auto forceUnroll = true;
-            auto allowRuntime = true;
-            auto allowExpensiveTripCount = true;
-            auto preserveCondBr = true;
-            auto preserveOnlyFirst = false;
+            // Set options
+            UnrollLoopOptions *ULO = new UnrollLoopOptions();
+            ULO->Count = unrollCount;
+            ULO->TripCount = tripCount;
+            ULO->Force = true;
+            ULO->AllowRuntime = true;
+            ULO->AllowExpensiveTripCount = true;
+            ULO->PreserveCondBr = true;
+            ULO->PreserveOnlyFirst = false;
+            ULO->TripMultiple = tripMultiple;
+            ULO->PeelCount = peelCount;
+            ULO->UnrollRemainder = false;
+            ULO->ForgetAllSCEV = false;
 
-            LoopUnrollResult unrolled = UnrollLoop(L, unrollCount, tripCount,
-                                                   forceUnroll, allowRuntime, allowExpensiveTripCount,
-                                                   preserveCondBr, preserveOnlyFirst, tripMultiple,
-                                                   peelCount, false, &LI, &SE, &DT, &AC, &ORE, true);
+
+            LoopUnrollResult unrolled = UnrollLoop(L, *ULO, &LI, &SE, &DT, &AC, &ORE, true);
 
             if (unrolled == LoopUnrollResult::FullyUnrolled || unrolled == LoopUnrollResult::PartiallyUnrolled)
                 errs() << "\nUNROLLED SUCCESSFULLY\n";
@@ -549,6 +555,8 @@ struct CAT : public ModulePass
 #endif
                 LG.insert(getLastLoopBlock(L)->getTerminator());
             }
+
+            delete ULO;
         }
         else
             LG.insert(getLastLoopBlock(L)->getTerminator());
@@ -1303,4 +1311,4 @@ static RegisterStandardPasses _RegPass1(PassManagerBuilder::EP_OptimizerLast,
 static RegisterStandardPasses _RegPass2(PassManagerBuilder::EP_EnabledOnOptLevel0,
                                         [](const PassManagerBuilder &, legacy::PassManagerBase &PM) {
         if(!_PassMaker){ PM.add(_PassMaker = new CAT()); } });
-
+        
